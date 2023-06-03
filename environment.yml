@@ -5,6 +5,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - pip=23.1
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_kmp_llvm
   - bzip2=1.0.8=h7b6447c_0
@@ -183,7 +184,6 @@ dependencies:
       - grpcio==1.51.3
       - h11==0.14.0
       - huggingface-hub==0.14.1
-      - hydra-core==1.1.2
       - hyperopt==0.2.7
       - identify==2.5.20
       - idna==3.4
@@ -224,7 +224,6 @@ dependencies:
       - matplotlib-inline==0.1.6
       - matplotlib-venn==0.11.9
       - mdurl==0.1.2
-      - metaseq==0.0.1
       - mistune==2.0.5
       - monotonic==1.6
       - more-itertools==9.1.0
@@ -257,7 +256,6 @@ dependencies:
       - nvidia-nccl-cu11==2.14.3
       - nvidia-nvtx-cu11==11.7.91
       - oauthlib==3.2.2
-      - omegaconf==2.1.2
       - openpyxl==3.1.2
       - packaging==23.0
       - pandas==2.0.0
@@ -388,4 +386,4 @@ dependencies:
       - xxhash==3.2.0
       - yarl==1.9.2
       - zipp==3.15.0
-prefix: /home/hrant/miniconda3/envs/gdb
+prefix: /home/hrant/miniconda3/envs/molgen

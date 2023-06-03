@@ -1,0 +1,22 @@
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Train data
+data-bin/train/00/*
+data-bin/valid/00/*
+
+# VSCODE
+.vscode/ftp-sync.json
+.vscode/settings.json
+.vscode/launch.json
+
+# Weights and Biases logs
+wandb/
+
+# Selfies files
+*_selfies.jsonl
