@@ -6,9 +6,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Train data
-data-bin/train/00/*
-data-bin/valid/00/*
+# Train/valid data
+data-bin_0/train/00/*
+data-bin_0/valid/00/*
+data-bin_1/train/00/*
+data-bin_1/valid/00/*
+
 
 # VSCODE
 .vscode/ftp-sync.json
@@ -20,3 +23,5 @@ wandb/
 
 # Selfies files
 *_selfies.jsonl
+
+Checkpoints/
