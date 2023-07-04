@@ -32,9 +32,9 @@ pip install -e .
 
 ## Install metaseq 
 cd..
-git clone https://github.com/Knarik1/metaseq.git
+git clone https://github.com/YerevaNN/metaseq.git
 cd metaseq
-pip3 install -e .
+pip install -e .
 git checkout scaling_racm3
 
 

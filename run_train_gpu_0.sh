@@ -1,10 +1,12 @@
 export CUDA_VISIBLE_DEVICES="0"
 export CUDA_LAUNCH_BLOCKING=1
 
+export PROJECT_NAME=Molecular_Generation_with_GDB13 
+
 metaseq-train --task streaming_language_modeling \
-                ../Molecular_Generation_with_GDB13/data-bin_0/ \
+                ../$PROJECT_NAME/data/data_bin_0/ \
                 --sample-break-mode "complete" \
-                --vocab-filename ../Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_smiles/vocab.txt \
+                --hf-tokenizer ../$PROJECT_NAME/data/tokenizers/tokenizer_sf/tokenizer.json \
                 --train-subset train \
                 --valid-subset valid \
                 --combine-valid-subsets \
@@ -40,14 +42,14 @@ metaseq-train --task streaming_language_modeling \
                 --fp16-init-scale 4 \
                 --fp16 \
                 --seed 1 \
-                --num-workers 4 \
-                --num-workers-valid 4 \
+                --num-workers 0 \
+                --num-workers-valid 0 \
                 --lr-scheduler polynomial_decay \
                 --lr 0.0001 \
                 --end-learning-rate 0.00001 \
                 --warmup-updates 3000 \
-                --total-num-update 360000 \
-                --max-update 360000 \
+                --total-num-update 180000 \
+                --max-update 180000 \
                 --tokens-per-sample 64 \
                 --batch-size 1024 \
                 --update-freq 1 \
@@ -56,7 +58,7 @@ metaseq-train --task streaming_language_modeling \
                 --ignore-unused-valid-subsets \
                 --validate-interval-updates 976 \
                 --wandb-project Molecular_Generation_with_GDB13 \
-                --wandb-run-name "Aspirin_0.4"\
+                --wandb-run-name aspirin_0.4_sf \
                 --save-interval-updates 1000 \
-                --save-dir "./Checkpoints/Aspirin_0.4/" \
-                --restore-file "" \
+                --save-dir "./checkpoints/aspirin_0.4_sf" \
+                --restore-file "./checkpoints/aspirin_0.4_sf/checkpoint_137000.pt" \

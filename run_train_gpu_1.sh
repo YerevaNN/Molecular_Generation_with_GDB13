@@ -1,10 +1,12 @@
 export CUDA_VISIBLE_DEVICES="1"
 export CUDA_LAUNCH_BLOCKING=1
 
+export PROJECT_NAME=Molecular_Generation_with_GDB13 
+
 metaseq-train --task streaming_language_modeling \
-                ../Molecular_Generation_with_GDB13/data-bin_1/ \
+                ../$PROJECT_NAME/data/data_bin_1/ \
                 --sample-break-mode "complete" \
-                --hf-tokenizer ../Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_selfies/tokenizer.json \
+                --hf-tokenizer ../$PROJECT_NAME/data/tokenizers/tokenizer_sf/tokenizer.json \
                 --train-subset train \
                 --valid-subset valid \
                 --combine-valid-subsets \
@@ -16,10 +18,10 @@ metaseq-train --task streaming_language_modeling \
                 --activation-fn relu \
                 --arch transformer_lm \
                 --share-decoder-input-output-embed \
-                --decoder-layers 4 \
-                --decoder-embed-dim 128 \
-                --decoder-ffn-embed-dim 512 \
-                --decoder-attention-heads 2 \
+                --decoder-layers 12 \
+                --decoder-embed-dim 768 \
+                --decoder-ffn-embed-dim 3072 \
+                --decoder-attention-heads 12 \
                 --decoder-learned-pos \
                 --no-scale-embedding \
                 --dropout 0.1 \
@@ -40,23 +42,24 @@ metaseq-train --task streaming_language_modeling \
                 --fp16-init-scale 4 \
                 --fp16 \
                 --seed 1 \
-                --num-workers 4 \
-                --num-workers-valid 4 \
+                --num-workers 0 \
+                --num-workers-valid 0 \
                 --lr-scheduler polynomial_decay \
-                --lr 0.0001 \
-                --end-learning-rate 0.00001 \
+                --lr 0.00006 \
+                --end-learning-rate 0.00006 \
                 --warmup-updates 3000 \
-                --total-num-update 360000 \
-                --max-update 360000 \
+                --total-num-update 500000 \
+                --max-update 500000 \
                 --tokens-per-sample 64 \
-                --batch-size 1024 \
+                --batch-size 256 \
                 --update-freq 1 \
                 --log-format json \
                 --log-interval 1 \
+                --save_interval_epochs \
                 --ignore-unused-valid-subsets \
                 --validate-interval-updates 976 \
                 --wandb-project Molecular_Generation_with_GDB13 \
-                --wandb-run-name "Aspirin_0.4_selfies"\
+                --wandb-run-name aspirin_0.4_sf_125M \
                 --save-interval-updates 1000 \
-                --save-dir "./Checkpoints/Aspirin_0.4_selfies/" \
-                --restore-file "" \
+                --save-dir "./checkpoints/aspirin_0.4_sf_125M/" \
+                --restore-file "./checkpoints/aspirin_0.4_sf_125M/checkpoint_122000.pt" \

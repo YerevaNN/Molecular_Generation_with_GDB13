@@ -15,43 +15,29 @@ import parmap
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
 
-
-DB_FILE_PATH = '/mnt/xtb/knarik/Smiles.db'
+from utils.db_utils import db_connect
+from utils.chem_utils import ASPIRIN_SMILES, calculate_similarity, calculate_sascore
 
 
 if __name__ == "__main__":
-    # Connect to DB
-    try:
-        conn = sqlite3.connect(DB_FILE_PATH)
-        cursor = conn.cursor()
-    except:
-        print(f"Error opening {DB_FILE_PATH} file")
-        sys.exit(1)
+    table_name = "GDB13"
+    chunk_size = 1_000_000
+    n_workers = 1
+    t0 = time.time() 
 
-    # Generate the MACCS keys for aspirin
-    aspirin_mol = Chem.MolFromSmiles('CC(=O)OC1=CC=CC=C1C(=O)O')
-    aspirin_fsp = MACCSkeys.GenMACCSKeys(aspirin_mol)
-    
+    # Connect to GDB13 database
+    con, cur = db_connect()
     
     def calculate_prop(row):
         id, smiles, _, _ = row
         similarity = None
         score = None
 
-        try:
-            # Convert the input SMILES to a RDKit molecule
-            mol = Chem.MolFromSmiles(smiles)
+        # Calculate the similarity of the input SMILES to aspirin
+        similarity = calculate_similarity(smiles, ASPIRIN_SMILES)
 
-            # Retrieve fingerprint
-            smiles_fsp = MACCSkeys.GenMACCSKeys(mol)
-
-            # Calculate the similarity of the input SMILES to aspirin
-            similarity = round(DataStructs.FingerprintSimilarity(aspirin_fsp, smiles_fsp), 4)
-
-            # Calculate SAScorescore
-            score = round(sascorer.calculateScore(mol), 4)
-        except:
-            pass    
+        # Calculate SAScorescore
+        score = calculate_sascore(smiles)
 
         return similarity, score, id
 
@@ -61,22 +47,22 @@ if __name__ == "__main__":
     n_workers = 1
 
     t1 = time.time()
-    for i in tqdm(range(968_000_001, total_rows, chunk_size)):
+    for i in tqdm(range(0, total_rows, chunk_size)):
         
         # Execute a query to fetch the next chunk of data
-        cursor.execute('SELECT * FROM GDB13 LIMIT ? OFFSET ?', (chunk_size, i))
-        rows = cursor.fetchall()
+        cur.execute('SELECT * FROM GDB13 LIMIT ? OFFSET ?', (chunk_size, i))
+        rows = cur.fetchall()
         
         # Calculate 2 column values
         update_values = parmap.map(calculate_prop, rows, pm_processes=n_workers)
 
         # Set Values to the table
         update_query = 'UPDATE GDB13 SET aspirin_similarity = ?, sascore = ? WHERE id = ?'
-        cursor.executemany(update_query, update_values)
-        conn.commit()
+        cur.executemany(update_query, update_values)
+        con.commit()
 
 
     print(time.time() - t1)
 
     
-    conn.close()   
+    con.close()   

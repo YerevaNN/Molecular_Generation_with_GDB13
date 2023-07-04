@@ -7,10 +7,9 @@ __pycache__/
 *$py.class
 
 # Train/valid data
-data-bin_0/train/00/*
-data-bin_0/valid/00/*
-data-bin_1/train/00/*
-data-bin_1/valid/00/*
+data/data_bin*
+data/data_subsets/*
+
 
 
 # VSCODE
@@ -18,10 +17,15 @@ data-bin_1/valid/00/*
 .vscode/settings.json
 .vscode/launch.json
 
-# Weights and Biases logs
-wandb/
 
 # Selfies files
 *_selfies.jsonl
 
-Checkpoints/
+checkpoints/
+ablations/generations/*/*.csv
+ablations/generations/*/*.pt
+ablations/perplexities/*/*.csv
+ablations/perplexities/*/*.pt
+
+tensorboard
+wandb
