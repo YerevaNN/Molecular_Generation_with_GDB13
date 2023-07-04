@@ -34,10 +34,12 @@ pip install -e .
 cd..
 git clone https://github.com/YerevaNN/metaseq.git
 cd metaseq
-pip install -e .
 git checkout scaling_racm3
+pip install -e .
 
 
 # turn on pre-commit hooks
 pre-commit install
 ```
+
+1. Download data_subsets from [here](https://disk.yandex.ru/d/Qmqhz2nXeYCR3Q) 
