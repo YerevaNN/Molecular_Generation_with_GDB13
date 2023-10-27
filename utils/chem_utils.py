@@ -43,6 +43,18 @@ def get_selfies_form(smiles: str):
         return sf.encoder(smiles)
     except:
         return "" 
+    
+def get_smiles_from_selfies(selfies: str):
+    canon_smiles = None
+    smiles = sf.decoder(selfies)
+
+    try:
+        canon_smiles = get_canonical_form(smiles)
+    except:
+        print("Can't make canonical", selfies)
+        return ""
+
+    return canon_smiles    
 
 
 def get_maccs_fp(smiles: str):

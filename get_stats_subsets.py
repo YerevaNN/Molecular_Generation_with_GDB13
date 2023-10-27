@@ -23,6 +23,7 @@ from rdkit.Chem import RDConfig
 
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
+from utils.chem_utils import check_canonical, check_validness
 
 
 def read_file(filename: str) -> list:
@@ -31,19 +32,30 @@ def read_file(filename: str) -> list:
     
     return data_arr
 
+ASPIRIN_SMILES = "CC(=O)OC1=CC=CC=C1C(=O)O"
 
-def check_validness(smiles:str) -> bool:
-    try:
-        return Chem.MolFromSmiles(smiles) is not None
+def get_maccs_fp(smiles: str):
+    try: 
+        mol = Chem.MolFromSmiles(smiles)
+
+        return MACCSkeys.GenMACCSKeys(mol)
     except:
-        return False
+        print("Can't calculate Maccs fingerprint")
+        return ""
 
 
-def check_canonical(smiles:str) -> bool:
-    try:
-        return Chem.MolToSmiles(Chem.MolFromSmiles(smiles)) == smiles
-    except:
-        return False
+def calculate_similarity(smiles: str, property_molecule_smiles: str):
+    # Get fingerprints
+    smiles_fsp = get_maccs_fp(smiles)
+    prop_mol_fsp = get_maccs_fp(property_molecule_smiles)
+
+    if smiles_fsp and prop_mol_fsp:
+        # Calculate the similarity of the input SMILES to property molecule
+        similarity = round(DataStructs.FingerprintSimilarity(prop_mol_fsp, smiles_fsp), 4)
+    else:
+        similarity = -1     
+
+    return similarity
 
 
 def get_smiles_stats(smiles_arr: list) -> dict:
@@ -173,16 +185,20 @@ if __name__ == "__main__":
 
     # sampling = "top" # temp / top
     repr = "selfies" # smiles / selfies
-    folder_substr = "sas_3_selfies" # sas_3 / aspirin_0.4
-    output_file = f'./Sampling_results_{folder_substr}_exp.xlsx'
+    folder_substr_train = "aspirin_0.4" # sas_3 / aspirin_0.4
     
-    column_name = "sascore" #aspirin_similarity/sascore
-    thresh = "3" # 0.4 / 3
-    sign = "<=" # >= / <=
-    generated_count = 2_000_000
+    
+    
+    column_name = "aspirin_similarity" #aspirin_similarity/sascore
+    thresh = "0.4" # 0.4 / 3
+    sign = ">=" # >= / <=
+    generated_count = 10_000_000
     chunk_size = 1024
-    canon_path = ""
-    n_workers = 4
+    canon_path = "./canonical_saved.csv"
+    n_workers = 1
+
+    folder_substr = f"aspirin_0.4_sf_all_sizes_{generated_count}" # sas_3 / aspirin_0.4
+    output_file = f'./ablations/statistics/Sampling_results_{folder_substr}.xlsx'
     # canon_path = "./Generations_sas_3_selfies/sample_2M/canonical_40M.csv"
 
     DB_FILE_PATH = '/mnt/xtb/knarik/Smiles.db'
@@ -198,24 +214,21 @@ if __name__ == "__main__":
         print(f"Error opening {DB_FILE_PATH} file")
         sys.exit(1) 
 
-    if os.path.exists(prop_json_file):
-        with open(prop_json_file) as json_file:
-            prop_dict = json.load(json_file)   
-    else:
-        prop_dict = {}  
+    # if os.path.exists(prop_json_file):
+    #     with open(prop_json_file) as json_file:
+    #         prop_dict = json.load(json_file)   
+    # else:
+    #     prop_dict = {}  
 
-    # Generate the MACCS keys for aspirin
-    aspirin_mol = Chem.MolFromSmiles('CC(=O)OC1=CC=CC=C1C(=O)O')
-    aspirin_fsp = MACCSkeys.GenMACCSKeys(aspirin_mol)
 
     # Delete previous tables
     delete_tables()      
 
     # Create Train table if not exists
-    create_table(f"train_{folder_substr}")
+    # create_table(f"train_{folder_substr_train}")
 
     # Load Train data if not exists
-    load_data_into_table(cursor, f"./data-bin/data-subsets/train_{folder_substr}.jsonl", f"train_{folder_substr}", repr=repr) 
+    # load_data_into_table(cursor, f"data/data_subsets/aspirin_0.4/train_aspirin_0.4_sm.jsonl", f"train_{folder_substr_train}", repr=repr) 
 
 
     if os.path.exists(output_file):
@@ -237,15 +250,15 @@ if __name__ == "__main__":
             ) 
 
 
-    if os.path.exists(prop_json_file):
-        with open(prop_json_file) as json_file:
-            prop_dict = json.load(json_file)   
-    else:
-        prop_dict = {}              
+    # if os.path.exists(prop_json_file):
+    #     with open(prop_json_file) as json_file:
+    #         prop_dict = json.load(json_file)   
+    # else:
+    #     prop_dict = {}              
         
     # Get generation file paths
-    # generated_smiles_paths = sorted(glob.glob(f'./Generations_{folder_substr}/*.csv'))
-    generated_smiles_paths = ["./Generations_sas_3_selfies/OPT_iter_190000_top_0.9_seed_3.csv"]
+    generated_smiles_paths = sorted(glob.glob(f'./ablations/generations/*.csv'))
+
 
     for smiles_path in tqdm(generated_smiles_paths):
         last_part = os.path.basename(smiles_path.split("/")[-1])
@@ -262,9 +275,9 @@ if __name__ == "__main__":
         smiles_real_count = len(smiles_arr)
         print("Smiles count", smiles_real_count)
 
-        if smiles_real_count < generated_count:
-            print(f"Generated smiles count is less than {generated_count}")
-            continue
+        # if smiles_real_count < generated_count:
+        #     print(f"Generated smiles count is less than {generated_count}")
+        #     continue
 
         print(f"================== Calculating valid/canonical counts ====================")    
 
@@ -272,19 +285,19 @@ if __name__ == "__main__":
         non_valid_count = 0
 
         
-        if os.path.exists(canon_path):
-            canon_smiles_arr = read_file(canon_path)  
-        else:
-            canon_smiles_arr = parmap.map(calc_stats, smiles_arr, pm_processes=n_workers, pm_pbar=True)
-            
+        # if os.path.exists(canon_path):
+        #     canon_smiles_arr = read_file(canon_path)  
+        # else:
+        #     canon_smiles_arr = parmap.map(calc_stats, smiles_arr, pm_processes=n_workers, pm_pbar=True)
+        canon_smiles_arr = smiles_arr    
         # make unique canonical
         canon_smiles_arr = set(canon_smiles_arr) 
         canon_smiles_count = len(canon_smiles_arr)   
 
-        with open(canon_path, "w") as f:
-            for smi in tqdm(canon_smiles_arr):
-                if smi:
-                    f.write(smi+"\n" )
+        # with open(canon_path, "w") as f:
+        #     for smi in tqdm(canon_smiles_arr):
+        #         if smi:
+        #             f.write(smi+"\n" )
         
 
         print(f"================== Loading Sample to db ====================")
@@ -325,15 +338,11 @@ if __name__ == "__main__":
                         score = round(sascorer.calculateScore(mol), 3)
 
                     elif column_name == "aspirin_similarity": 
-                        # Retrieve fingerprint
-                        smiles_fsp = MACCSkeys.GenMACCSKeys(mol)
-
-                        # Calculate the similarity of the input SMILES to aspirin
-                        score = round(DataStructs.FingerprintSimilarity(aspirin_fsp, smiles_fsp), 4) 
+                        score = calculate_similarity(smi, ASPIRIN_SMILES)
                     else:
                         score = None    
 
-                    scores.append(score)    
+                    # scores.append(score)    
 
                     if eval(f"{score} {sign} {thresh}"):
                         in_subset_count += 1         
@@ -341,10 +350,10 @@ if __name__ == "__main__":
                     pass
 
 
-            prop_dict[smiles_path] = scores  
-            print("Props stats saved at", prop_json_file)
-            with open(prop_json_file, "w") as f:
-                json.dump(prop_dict, f)    
+            # prop_dict[smiles_path] = scores  
+            # print("Props stats saved at", prop_json_file)
+            # with open(prop_json_file, "w") as f:
+            #     json.dump(prop_dict, f)    
                 
             
             print("Time", (time.time() - time_3), "sec")
@@ -366,13 +375,11 @@ if __name__ == "__main__":
         print(f"================== Train Recall ====================")    
         time_3 = time.time()
 
-        # folder_substr = "original_selfies"   
-
         print("Joining with Train where ...")
-        cursor.execute(f'''SELECT COUNT('train_{folder_substr}'.name)
-                        FROM 'train_{folder_substr}'
+        cursor.execute(f'''SELECT COUNT('train_{folder_substr_train}'.name)
+                        FROM 'train_{folder_substr_train}'
                         JOIN '{model_name}' 
-                        ON 'train_{folder_substr}'.name = '{model_name}'.name''')
+                        ON 'train_{folder_substr_train}'.name = '{model_name}'.name''')
         
         from_train_unique = cursor.fetchone()[0]
         print("Time", (time.time() - time_3), "sec")
@@ -386,7 +393,7 @@ if __name__ == "__main__":
             in_GDB_unique,
             subset_GDB_inter if column_name else "-",
             from_train_unique,
-            generated_count
+            smiles_real_count
         ]
 
         # Save
