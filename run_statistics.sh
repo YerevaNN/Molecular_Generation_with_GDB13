@@ -1,6 +1,6 @@
-export TRAIN_FOLDER="aspirin_0.4"
-export COLUMN_NAME="aspirin_similarity" # aspirin_similarity / sascore / drug_sim / poison_sim
-export CONDITION=">=0.4" # >=0.4, <=3
+export TRAIN_FOLDER="druglike_0.4" # aspirin_0.4, sas_3, druglike_0.4, equal_dist 
+export COLUMN_NAME="GDB13.drug_sim,GDB13.poison_sim" # GDB13.aspirin_similarity / GDB13.sascore / GDB13.drug_sim, GDB13.poison_sim
+export CONDITION="GDB13.drug_sim>0.4#AND#GDB13.poison_sim<=0.4" # GDB13.aspirin_similarity>=0.4, GDB13.sascore<=3, GDB13.drug_sim>0.4#AND#GDB13.poison_sim<=0.4, GDB13.drug_sim>=0.20#AND#GDB13.drug_sim<0.2165#AND#GDB13.poison_sim>=0.20#AND#GDB13.poison_sim<0.2165
 export GEN_LEN=100000
 
 export FILE_PATH=./ablations/generations/OPT_1.2B_ep_1_$TRAIN_FOLDER"_sf_1000K_gen_1000000.csv"
@@ -19,4 +19,3 @@ python get_stats_subsets.py \
     --output_file $OUTPUT_FILE \
     --db_path $DB_FILE_PATH \
     --scores_output_file $SCORES_OUTPUT_FILE \
- 

@@ -75,7 +75,7 @@ def calculate_similarity(smiles: str, property_molecule_smiles: str):
     prop_mol_fsp = get_maccs_fp(property_molecule_smiles)
 
     if smiles_fsp and prop_mol_fsp:
-        # Calculate the similarity of the input Sis_validsmilesMILES to property molecule
+        # Calculate the similarity of the input SMILES to property molecule
         similarity = round(DataStructs.FingerprintSimilarity(prop_mol_fsp, smiles_fsp), 4)
     else:
         similarity = -1     

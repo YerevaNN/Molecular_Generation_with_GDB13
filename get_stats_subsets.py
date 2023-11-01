@@ -19,6 +19,8 @@ from utils.db_utils import db_connect
 
 
 ASPIRIN_SMILES = "CC(=O)OC1=CC=CC=C1C(=O)O"
+DRUG_SMILES = "CC(=O)NC1=CC=C(C=C1)O"
+POISON_SMILES = "COC1=CC=C(C=C1)[N+](=O)[O-]"
 GDB13_count = 975820227
 
 
@@ -123,7 +125,11 @@ def cli_main():
                 "Generated Smiles count"
                 ]
             ) 
-            
+
+    if "#" in args.condition:
+        # temporary solution
+        args.condition = args.condition.replace("#", " ")  
+
     model_name = args.file_path.split("/")[-1].split(".csv")[0]
 
     if f'{model_name}' in df["Model"].values:
@@ -160,7 +166,7 @@ def cli_main():
         # Join GDB13 and generated smiles
         time_2 = time.time()
         print("Joining with GDB13 ...")
-        cursor.execute(f'''SELECT GDB13.name, GDB13.{args.column_name}
+        cursor.execute(f'''SELECT GDB13.name, {args.column_name}
                         FROM GDB13
                         JOIN '{model_name}' 
                         ON GDB13.name = '{model_name}'.name''')
@@ -169,10 +175,10 @@ def cli_main():
         print("Time", (time.time() - time_2) , "sec")
 
         print(f"================== From non-GDB13 ====================")
-        # Left Joingenerated smiles and GDB
+        # Left Join generated smiles and GDB
         time_2 = time.time()
         print("Joining with GDB13 ...")
-        cursor.execute(f'''SELECT '{model_name}'.name, GDB13.{args.column_name}
+        cursor.execute(f'''SELECT '{model_name}'.name, {args.column_name}
                         FROM '{model_name}' 
                         LEFT JOIN GDB13
                         ON '{model_name}'.name = GDB13.name
@@ -185,11 +191,11 @@ def cli_main():
         print(f"================== From GDB and condition ====================")
         time_2 = time.time()
         print("Joining with GDB13 to get the values satisfying the condition ...")
-        cursor.execute(f'''SELECT '{model_name}'.name, GDB13.{args.column_name}
+        cursor.execute(f'''SELECT '{model_name}'.name, {args.column_name}
                         FROM '{model_name}' 
                         JOIN GDB13
                         ON '{model_name}'.name = GDB13.name
-                        WHERE GDB13.{args.column_name} {args.condition}''')
+                        WHERE {args.condition}''')
         
         from_GDB_and_cond_arr = cursor.fetchall()
         print("Time", (time.time() - time_2), "sec")
@@ -204,19 +210,36 @@ def cli_main():
         for smi, _ in tqdm(from_non_GDB_arr):
             try:
                 mol = Chem.MolFromSmiles(smi)
-                if args.column_name == "sascore":
+                if args.train_folder == "sas_3":
                     # Calculate SAScore
                     score = round(sascorer.calculateScore(mol), 3)
 
-                elif args.column_name == "aspirin_similarity": 
+                    if score <= 3:
+                        from_non_GDB_and_cond_arr.append(smi) 
+
+                elif args.train_folder == "aspirin_0.4": 
                     score = calculate_similarity(smi, ASPIRIN_SMILES)
+                    if score >= 0.4:
+                        from_non_GDB_and_cond_arr.append(smi) 
+
+                elif args.train_folder == "druglike_0.4": 
+                    score_drug = calculate_similarity(smi, DRUG_SMILES)
+                    score_pois = calculate_similarity(smi, POISON_SMILES)
+
+                    if score_drug>0.4 and score_pois<=0.4:
+                        from_non_GDB_and_cond_arr.append(smi) 
+
+                elif args.train_folder == "equal_dist": 
+                    score_drug = calculate_similarity(smi, DRUG_SMILES)
+                    score_pois = calculate_similarity(smi, POISON_SMILES)
+
+                    if score_drug>=0.20 and score_drug<0.2165 and score_pois>=0.20 and score_pois<0.2165:
+                        from_non_GDB_and_cond_arr.append(smi)            
+
                 else:
                     score = None    
 
-                scores_arr.append((smi, score))    
-
-                if eval(f"{score} {args.condition}"):
-                    from_non_GDB_and_cond_arr.append(smi)         
+                scores_arr.append((smi, score))                            
             except:
                 pass
 
