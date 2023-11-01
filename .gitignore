@@ -22,10 +22,8 @@ data/data_subsets/*
 *_selfies.jsonl
 
 checkpoints/
-ablations/generations/*/*.csv
-ablations/generations/*/*.pt
-ablations/perplexities/*/*.csv
-ablations/perplexities/*/*.pt
+ablations/generations/*.csv
+ablations/perplexities/*.csv
 
 tensorboard
 wandb
