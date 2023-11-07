@@ -150,7 +150,8 @@ def cli_main():
     
     print(f"================== Calculating valid/canonical counts ====================")    
     validness_stats = get_smiles_stats(smiles_arr)
-    all_canon_arr = validness_stats["canonical"]["arr"] + validness_stats["canonical"]["converted_arr"]
+    # all_canon_arr = validness_stats["canonical"]["arr"] + validness_stats["canonical"]["converted_arr"]
+    all_canon_arr = validness_stats["canonical"]["arr"]
 
    
     print(f"================== Loading Sample to db ====================")

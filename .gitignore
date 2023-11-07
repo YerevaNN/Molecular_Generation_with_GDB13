@@ -24,6 +24,7 @@ data/data_subsets/*
 checkpoints/
 ablations/generations/*.csv
 ablations/perplexities/*.csv
+ablations/statistics/
 
 tensorboard
 wandb
