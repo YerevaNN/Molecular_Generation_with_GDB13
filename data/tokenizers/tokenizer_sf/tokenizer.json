@@ -1667,6 +1667,24 @@
       "rstrip": false,
       "normalized": true,
       "special": true
+    },
+    {
+      "id": 185,
+      "content": "[Canon]",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": true,
+      "special": false
+    },
+    {
+      "id": 186,
+      "content": "[Rand]",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": true,
+      "special": false
     }
   ],
   "normalizer": null,
