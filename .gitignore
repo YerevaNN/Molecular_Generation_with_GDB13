@@ -28,3 +28,4 @@ ablations/statistics/
 
 tensorboard
 wandb
+.aim
