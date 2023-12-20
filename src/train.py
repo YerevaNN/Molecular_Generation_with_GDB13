@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import sys
 import glob
 import random
 from itertools import chain
@@ -17,6 +18,7 @@ from datasets import load_dataset
 from huggingface_hub import Repository, create_repo
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+from aim import Run
 
 import transformers
 from transformers import (
@@ -179,13 +181,27 @@ def parse_args():
         help="Whether to enable experiment trackers for logging.",
     )
     parser.add_argument(
-        "--log_with",
+        "--experiment_name",
         type=str,
-        default="all",
+        default="Experiment name.",
         help=(
-            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`,'
-            ' `"wandb"`, `"comet_ml"` and `"clearml"`. Use `"all"` (default) to report to all integrations. '
-            "Only applicable when `--with_tracking` is passed."
+            "Experiment name."
+        ),
+    )
+    parser.add_argument(
+        "--experiment_description",
+        type=str,
+        default="Experiment description.",
+        help=(
+            "Experiment description."
+        ),
+    )
+    parser.add_argument(
+        "--aim_resume_hash",
+        type=str,
+        default="",
+        help=(
+            "Hash to resume from."
         ),
     )
     parser.add_argument(
@@ -202,13 +218,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    accelerator_log_kwargs = {}
-
-    if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = args.log_with
-        accelerator_log_kwargs["project_dir"] = args.track_dir
-
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
+    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -231,6 +241,24 @@ def main():
         # cudnn backend
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False 
+
+
+    if args.with_tracking:
+        if args.aim_resume_hash:
+            run = Run(run_hash=args.aim_resume_hash, force_resume=True)
+            logger.info("Resuming from Aim hash", args.aim_resume_hash)
+        else:
+            run = Run(experiment=f'{args.experiment_name}', repo=args.track_dir)
+
+            run["hparams"] = {
+                "cli": sys.argv
+            }
+
+            for arg in vars(args):
+                try:
+                    run["hparams", arg] = getattr(args, arg)
+                except   TypeError:
+                    run["hparams", arg] = str(getattr(args, arg))
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -304,7 +332,7 @@ def main():
             remove_columns=column_names,
             load_from_cache_file=not args.overwrite_cache,
             desc="Running tokenizer on dataset",
-        )    
+        )  
 
     train_dataset = tokenized_datasets["train"]
     eval_dataset = tokenized_datasets["valid"]
@@ -322,32 +350,36 @@ def main():
     )    
 
     if args.resume_from_checkpoint:
-        logger.info(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
+        ...
+        # logger.info(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
     
-        # loading weights
-        weights = torch.load(args.resume_from_checkpoint, map_location='cpu')
+        # # loading weights
+        # weights = torch.load(args.resume_from_checkpoint, map_location='cpu')
 
-        # rename the layer in the state dictionary
-        old_layer_name = "decoder.layer_norm"
-        new_layer_name = "decoder.final_layer_norm"
-        del weights["model"]["decoder.version"]
+        # # rename the layer in the state dictionary
+        # old_layer_name = "decoder.layer_norm"
+        # new_layer_name = "decoder.final_layer_norm"
+        # del weights["model"]["decoder.version"]
 
-        old_state_dict = weights["model"]
-        new_state_dict = {}
+        # old_state_dict = weights["model"]
+        # new_state_dict = {}
 
-        for key, value in old_state_dict.items():
-            if old_layer_name in key:
-                new_key = key.replace(old_layer_name, new_layer_name)
-                new_state_dict[new_key] = value
-            else:
-                new_state_dict[key] = value
+        # for key, value in old_state_dict.items():
+        #     if old_layer_name in key:
+        #         new_key = key.replace(old_layer_name, new_layer_name)
+        #         new_state_dict[new_key] = value
+        #     else:
+        #         new_state_dict[key] = value
 
-        # load the new state dictionary into the model
-        weights["model"] = new_state_dict
+        # # load the new state dictionary into the model
+        # weights["model"] = new_state_dict
 
-        # loading
-        # TODO: check the last lm_head weights, wheather its from pre-trained
-        model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=None, config=config, state_dict=weights["model"])
+        # # loading
+        # # TODO: check the last lm_head weights, wheather its from pre-trained
+
+        # model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=None, config=config, state_dict=weights["model"])
+
+        model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
@@ -360,9 +392,9 @@ def main():
                 getattr(p, "_orig_size", p).numel()
                 for p in model.parameters()
                 if p.requires_grad
-            ),
+            )
         )
-    ) 
+    )
 
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
@@ -375,7 +407,7 @@ def main():
         {
             "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
             "weight_decay": 0.0,
-        },
+        }
     ]
 
     # according to https://huggingface.co/docs/accelerate/v0.25.0/en/concept_guides/performance#learning-rates
@@ -386,6 +418,7 @@ def main():
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -418,13 +451,6 @@ def main():
     if checkpointing_steps is not None and checkpointing_steps.isdigit():
         checkpointing_steps = int(checkpointing_steps)
 
-    # We need to initialize the trackers we use, and also store our configuration.
-    # The trackers initializes automatically on the main process.
-    if args.with_tracking:
-        experiment_config = vars(args)
-        # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("clm_no_trainer", experiment_config)
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -443,24 +469,14 @@ def main():
 
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            checkpoint_path = args.resume_from_checkpoint
-            path = os.path.basename(args.resume_from_checkpoint)
-        else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
-            checkpoint_path = path
-            path = os.path.basename(checkpoint_path)
+        path = os.path.basename(args.resume_from_checkpoint)
+        accelerator.load_state(args.resume_from_checkpoint)
 
-        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
-        accelerator.load_state(checkpoint_path)
-        # Extract `epoch_{i}` or `step_{i}`
+        # Extract `step_{i}`
         training_difference = os.path.splitext(path)[0]
 
         # need to multiply `gradient_accumulation_steps` to reflect real steps
-        resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
+        resume_step = int(training_difference.replace("checkpoint_", "")) * args.gradient_accumulation_steps
         starting_epoch = resume_step // len(train_dataloader)
         completed_steps = resume_step // args.gradient_accumulation_steps
         resume_step -= starting_epoch * len(train_dataloader)
@@ -470,9 +486,6 @@ def main():
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
-
-        if args.with_tracking:
-            total_loss = 0
 
         if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
@@ -484,75 +497,65 @@ def main():
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
-                # We keep track of the loss at each epoch
-                if args.with_tracking:
-                    total_loss += loss.detach().float()
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-            # Checks if the accelerator has performed an optimization step behind the scenes
-            # TODO: explore    
+            # Check if the accelerator performes an optimization step behind the scenes
+            # TODO: explore
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
 
-            if isinstance(checkpointing_steps, int):
-                if completed_steps % checkpointing_steps == 0:
-                    output_dir = f"checkpoint_{completed_steps}"
-                    if args.output_dir is not None:
-                        output_dir = os.path.join(args.output_dir, output_dir)
-                    accelerator.save_state(output_dir)
-
-            if args.with_tracking:
-                accelerator.log(
-                    {
-                        # "perplexity": perplexity,
-                        "train_loss": loss.item(),
-                        "step": completed_steps,
-                    },
-                    step=completed_steps
-                )        
-
-            if completed_steps % args.validation_steps == 0:
-                model.eval()
-                valid_losses = []
-
-                for step, batch in enumerate(eval_dataloader):
-                    with torch.no_grad():
-                        outputs = model(**batch)
-
-                    valid_loss = outputs.loss
-                    valid_losses.append(accelerator.gather_for_metrics(valid_loss.repeat(args.per_device_eval_batch_size)))
-
-                    # # Gather all predictions and targets
-                    # all_predictions, all_targets = accelerator.gather_for_metrics((predictions, targets))
-                    # # Example of use with a *Datasets.Metric*
-                    # metric.add_batch(all_predictions, all_targets)
-
-                valid_losses = torch.cat(valid_losses)
-                try:
-                    eval_loss = torch.mean(valid_losses)
-                    perplexity = math.exp(eval_loss)
-                except OverflowError:
-                    perplexity = float("inf")
-
-                # TODO: check what is completed_steps
-                logger.info(f"Step {completed_steps}: perplexity: {perplexity} eval_loss: {eval_loss}")
+                if isinstance(checkpointing_steps, int):
+                    if completed_steps % checkpointing_steps == 0:
+                        output_dir = f"checkpoint_{completed_steps}"
+                        if args.output_dir is not None:
+                            output_dir = os.path.join(args.output_dir, output_dir)
+                        accelerator.save_state(output_dir, safe_serialization=False)
 
                 if args.with_tracking:
-                    accelerator.log(
-                        {
-                            "perplexity": perplexity,
-                            "eval_loss": eval_loss,
-                            "step": completed_steps,
-                        },
-                        step=completed_steps
-                    )
+                    run.track(loss.item(), name="loss", step=completed_steps, context={"subset":"train"})
+                    run.track(lr_scheduler.get_lr()[0], name="lr", step=completed_steps, context={"subset":"train"})
 
-            if completed_steps >= args.max_train_steps:
-                break    
+                    wps = args.per_device_train_batch_size * args.max_position_embeddings * args.gradient_accumulation_steps * accelerator.num_processes
+                    run.track(wps, name="wps", step=completed_steps, context={"subset":"train"})
+
+                if completed_steps % args.validation_steps == 0:
+                    model.eval()
+                    valid_losses = []
+
+                    for step, batch in enumerate(eval_dataloader):
+                        with torch.no_grad():
+                            outputs = model(**batch)
+
+                        valid_loss = outputs.loss
+                        valid_losses.append(accelerator.gather_for_metrics(valid_loss.repeat(args.per_device_eval_batch_size)))
+
+                        # # Gather all predictions and targets
+                        # all_predictions, all_targets = accelerator.gather_for_metrics((predictions, targets))
+                        # # Example of use with a *Datasets.Metric*
+                        # metric.add_batch(all_predictions, all_targets)
+
+                    valid_losses = torch.cat(valid_losses)
+
+                    try:
+                        eval_loss = torch.mean(valid_losses)
+                        perplexity = math.exp(eval_loss)
+                    except OverflowError:
+                        perplexity = float("inf")
+
+                    # TODO: check what is completed_steps
+                    logger.info(f"Step {completed_steps}: eval_perplexity: {perplexity} eval_loss: {eval_loss}", main_process_only=True)
+
+                    if args.with_tracking:
+                        ...
+                        run.track(eval_loss.item(), name="loss", step=completed_steps, context={"subset":"val"})
+                        run.track(perplexity, name="ppl", step=completed_steps, context={"subset":"val"})
+
+                if completed_steps >= args.max_train_steps:
+                    break    
 
         # if args.push_to_hub and epoch < args.num_train_epochs - 1:
         #     accelerator.wait_for_everyone()
