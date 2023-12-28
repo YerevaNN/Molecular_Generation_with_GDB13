@@ -1,0 +1,46 @@
+
+python src/train_with_trainer.py \
+    --seed 1 \
+    --output_dir ./src/checkpoints/OPT_85M_ep_1_sas_3_sf_1000K_6.00E-04_new_new \
+    --dataset_name "src/data/data/data_bin_sas_3_sf_1000K" \
+    --tokenizer_name ./src/data/tokenizers/tokenizer_sf/tokenizer.json \
+    --resume_from_checkpoint "" \
+    --do_train \
+    --do_eval \
+    --evaluation_strategy "steps" \
+    --preprocessing_num_workers 1 \
+    --overwrite_cache False \
+    --config_name "facebook/opt-125m" \
+    --max_position_embeddings 64 \
+    --dropout 0.0 \
+    --vocab_size 192 \
+    --optim "adamw_torch" \
+    --adam_beta2 0.95 \
+    --weight_decay 0.1 \
+    --dataloader_num_workers 0 \
+    --dataloader_drop_last=True \
+    --dataloader_pin_memory=True \
+    --fp16=True \
+    --fp16_backend "auto" \
+    --fp16_full_eval False \
+    --gradient_checkpointing False \
+    --group_by_length False \
+    --half_precision_backend "auto" \
+    --include_num_input_tokens_seen False \
+    --include_tokens_per_second False \
+    --learning_rate 6.00E-04 \
+    --local_rank 0 \
+    --log_on_each_node True \
+    --gradient_accumulation_steps 1 \
+    --logging_steps 1 \
+    --eval_steps 2 \
+    --max_steps -1 \
+    --save_steps 500 \
+    --warmup_steps 100 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 4 \
+    --report_to "none" \
+    --save_safetensors False \
+    --run_name "Fine_tuning from scratch OPT_85M_ep_1_sas_3_sf_1000K."
+      
