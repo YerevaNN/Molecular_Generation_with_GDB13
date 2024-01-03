@@ -29,3 +29,5 @@ ablations/statistics/
 tensorboard
 wandb
 .aim
+
+src/data/data
