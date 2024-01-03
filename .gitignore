@@ -21,10 +21,10 @@ data/data_subsets/*
 # Selfies files
 *_selfies.jsonl
 
-checkpoints/
-ablations/generations/*.csv
-ablations/perplexities/*.csv
-ablations/statistics/
+src/checkpoints/
+src/ablations/generations/*.csv
+src/ablations/perplexities/*.csv
+src/ablations/statistics/
 
 tensorboard
 wandb

@@ -1,0 +1,40 @@
+accelerate launch --config_file ./accelerate_config.yaml \
+     src/train_with_trainer.py \
+    --seed 1 \
+    --output_dir ./src/checkpoints/OPT_1.2B_ep_1_half_sf_848M_2.00E-04_hf \
+    --dataset_name src/data/data/data_bin_half_rand_sf_848M \
+    --tokenizer_name ./src/data/tokenizers/tokenizer_sf/tokenizer.json \
+    --resume_from_checkpoint "" \
+    --do_train \
+    --do_eval \
+    --evaluation_strategy steps \
+    --preprocessing_num_workers 30 \
+    --config_name facebook/opt-1.3b \
+    --max_position_embeddings 64 \
+    --dropout 0.0 \
+    --vocab_size 192 \
+    --optim adamw_torch \
+    --adam_beta2 0.95 \
+    --weight_decay 0.1 \
+    --dataloader_num_workers 1 \
+    --dataloader_drop_last \
+    --dataloader_pin_memory \
+    --fp16 \
+    --fp16_backend auto \
+    --half_precision_backend auto \
+    --learning_rate 2.00E-04 \
+    --local_rank 0 \
+    --log_on_each_node \
+    --gradient_accumulation_steps 8 \
+    --logging_steps 1 \
+    --eval_steps 500 \
+    --max_steps -1 \
+    --save_steps 3000 \
+    --warmup_steps 10352 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 128 \
+    --per_device_eval_batch_size 128 \
+    --report_to none \
+    --save_safetensors False\
+    --aim_exp_name "OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_bs_8x1024_hf, grad_accum=8 [CANON]/[RAND] in the beginning, same batch size." \
+    --aim_repo_dir "./"

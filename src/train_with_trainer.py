@@ -173,6 +173,22 @@ class ModelArguments:
             )
         },
     )
+    aim_exp_name: str = field(
+        default="Experiment name.",
+        metadata={
+            "help": (
+                "The name of the experiment, racking by aim."
+            )
+        },
+    )
+    aim_repo_dir: str = field(
+        default="./",
+        metadata={
+            "help": (
+                "The repo for saving aim files."
+            )
+        },
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -290,7 +306,7 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Initialize aim_callback
-    aim_callback = AimCallback(experiment=training_args.run_name)
+    aim_callback = AimCallback(repo=training_args.aim_repo_dir, experiment=training_args.aim_exp_name)
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -307,7 +323,9 @@ def main():
 
     # Dataset
     data_files = {}
-    dataset_args = {}
+    dataset_args = {
+        "cache_dir": "src/data/data/"
+    }
 
     if data_args.dataset_name:
         data_files["train"] = glob.glob(f"{data_args.dataset_name}/train/00/*.jsonl")
@@ -316,9 +334,13 @@ def main():
         raise ValueError(
             "Dataset name is required."
         ) 
-
+    logger.info(f"Loading local data from {data_args.dataset_name} ...")
     raw_datasets = load_dataset("json", data_files=data_files, **dataset_args)
-    print(raw_datasets)
+    logger.info(raw_datasets["train"])
+
+    # for debuggng
+    # raw_datasets["train"] = raw_datasets["train"].select(range(1000000))
+    # print(raw_datasets["train"])
 
     if model_args.tokenizer_name:
         tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
@@ -338,8 +360,6 @@ def main():
         tokenizer.pad_token = "<pad>"
 
         if len(tokenizer.get_vocab()) != config.vocab_size:
-            print("Adding tokens to vocabulary")
-
             i = len(tokenizer.get_vocab())
 
             while i < config.vocab_size:
@@ -436,33 +456,26 @@ def main():
             if isinstance(logits, tuple):
                 # Depending on the model and config, logits may contain extra tensors,
                 # like past_key_values, but logits always come first
+                # In case the model returns more than the prediction logits
                 logits = logits[0]
-            return logits.argmax(dim=-1)
-
-        metric = evaluate.load("accuracy")
-
-        def compute_metrics(eval_preds):
-            preds, labels = eval_preds
-            # preds have the same shape as the labels, after the argmax(-1) has been calculated
-            # by preprocess_logits_for_metrics but we need to shift the labels
-            labels = labels[:, 1:].reshape(-1)
-            preds = preds[:, :-1].reshape(-1)
-            return metric.compute(predictions=preds, references=labels)
+            return logits
         
         @torch.no_grad()
-        def perplexity_custom(eval_preds, base=2):
+        def compute_perplexity(eval_preds, base=2):
             logits, labels = eval_preds
-            logits = logits[:, 1:].reshape(-1)
-            labels = labels[:, 1:].reshape(-1)
+            logits = torch.FloatTensor(logits)
+            labels = torch.LongTensor(labels)
+        
+            logits = logits.view(-1, logits.shape[-1])
+            labels = labels.view(-1)
 
-            print("base", base)
             loss = F.cross_entropy(logits, labels, reduction="none")
-            pad_mask = labels != 1  # CustomTokenizer.precomuted_ids["<pad>"][0]
+
+            pad_mask = labels != 1
             loss = loss * pad_mask  # ignore pad tokens
             comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
-            return comp_perp.item()
+            return {"ppl": comp_perp.item()}
 
-        
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -471,7 +484,7 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
-        compute_metrics=compute_metrics if training_args.do_eval else None,
+        compute_metrics=compute_perplexity if training_args.do_eval else None,
         callbacks=[aim_callback],
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
     )
