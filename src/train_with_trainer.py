@@ -476,15 +476,21 @@ def main():
             logits, labels = eval_preds
             logits = torch.FloatTensor(logits)
             labels = torch.LongTensor(labels)
-        
-            logits = logits.view(-1, logits.shape[-1])
-            labels = labels.view(-1)
 
-            loss = F.cross_entropy(logits, labels, reduction="none")
+            labels = labels.to(logits.device)
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
 
-            pad_mask = labels != 1
-            loss = loss * pad_mask  # ignore pad tokens
-            comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss(reduction="none")
+            loss = loss_fct(shift_logits.view(-1, shift_logits.shape[-1]), shift_labels.view(-1))
+            print("loss mean with hand", loss.mean())
+
+            # pad_mask = labels != 1
+            # loss = loss * pad_mask  # ignore pad tokens
+            # comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
+            comp_perp = base ** (loss.mean() / math.log(2))
             return {"ppl": comp_perp.item()}
 
     # Initialize our Trainer
