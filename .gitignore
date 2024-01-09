@@ -7,10 +7,7 @@ __pycache__/
 *$py.class
 
 # Train/valid data
-data/data_bin*
-data/data_subsets/*
-
-
+src/data/data
 
 # VSCODE
 .vscode/ftp-sync.json
@@ -29,5 +26,3 @@ src/ablations/statistics/
 tensorboard
 wandb
 .aim
-
-src/data/data

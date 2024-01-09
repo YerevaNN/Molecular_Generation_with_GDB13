@@ -1,15 +1,14 @@
-accelerate launch --config_file ./accelerate_config.yaml \
-     src/train_with_trainer.py \
+accelerate launch --config_file ../accelerate_fsdp_config.yaml \
+     ../src/train_with_trainer.py \
     --seed 1 \
-    --output_dir ./src/checkpoints/OPT_1.2B_ep_1_half_sf_848M_2.00E-04_hf \
-    --dataset_name src/data/data/data_bin_half_rand_sf_848M \
-    --tokenizer_name ./src/data/tokenizers/tokenizer_sf/tokenizer.json \
+    --output_dir ../src/checkpoints/OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_hf \
+    --dataset_name ../src/data/data/data_bin_half_rand_sf_848M \
+    --tokenizer_name ../src/data/tokenizers/tokenizer_sf/tokenizer.json \
     --resume_from_checkpoint "" \
     --do_train \
     --do_eval \
     --evaluation_strategy steps \
-    --preprocessing_num_workers 30 \
-    --config_name facebook/opt-1.3b \
+    --config_name facebook/opt-1.3B \
     --max_position_embeddings 64 \
     --dropout 0.0 \
     --vocab_size 192 \
@@ -26,15 +25,17 @@ accelerate launch --config_file ./accelerate_config.yaml \
     --local_rank 0 \
     --log_on_each_node \
     --gradient_accumulation_steps 8 \
+    --preprocessing_num_workers 30 \
     --logging_steps 1 \
-    --eval_steps 500 \
+    --eval_steps 100 \
     --max_steps -1 \
-    --save_steps 3000 \
+    --save_steps 1000 \
     --warmup_steps 10352 \
     --num_train_epochs 1 \
     --per_device_train_batch_size 128 \
     --per_device_eval_batch_size 128 \
     --report_to none \
-    --save_safetensors False\
-    --aim_exp_name "OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_bs_8x1024_hf, grad_accum=8 [CANON]/[RAND] in the beginning, same batch size." \
-    --aim_repo_dir "./"
+    --save_safetensors False \
+    --aim_exp_name "OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_bs_8x8x128_hf, grad_accum=8 [CANON]/[RAND] in the beginning, same batch size." \
+    --aim_repo_dir "../" \
+    --train_with_sample_size 0

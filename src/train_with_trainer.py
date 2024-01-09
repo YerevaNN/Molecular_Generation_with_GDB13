@@ -37,6 +37,7 @@ import evaluate
 import torch
 import torch.nn.functional as F
 from datasets import load_dataset
+from torch.nn import CrossEntropyLoss
 
 import transformers
 from transformers import (
@@ -173,22 +174,6 @@ class ModelArguments:
             )
         },
     )
-    aim_exp_name: str = field(
-        default="Experiment name.",
-        metadata={
-            "help": (
-                "The name of the experiment, racking by aim."
-            )
-        },
-    )
-    aim_repo_dir: str = field(
-        default="./",
-        metadata={
-            "help": (
-                "The repo for saving aim files."
-            )
-        },
-    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -275,8 +260,36 @@ class DataTrainingArguments:
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
 
+@dataclass
+class CustomTrainingArguments(TrainingArguments):
+    train_with_sample_size: Optional[int] = field(
+        default=0,
+        metadata={
+            "help": (
+                "Sample dataset to train."
+            )
+        },
+    )
+    aim_exp_name: str = field(
+        default="",
+        metadata={
+            "help": (
+                "The name of the experiment, racking by aim."
+            )
+        },
+    )
+    aim_repo_dir: str = field(
+        default="./",
+        metadata={
+            "help": (
+                "The repo for saving aim files."
+            )
+        },
+    )
+
+
 def main():
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -306,7 +319,9 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Initialize aim_callback
-    aim_callback = AimCallback(repo=training_args.aim_repo_dir, experiment=training_args.aim_exp_name)
+    aim_callback = None
+    if training_args.aim_exp_name:
+        aim_callback = AimCallback(repo=training_args.aim_repo_dir, experiment=training_args.aim_exp_name)
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -324,7 +339,7 @@ def main():
     # Dataset
     data_files = {}
     dataset_args = {
-        "cache_dir": "src/data/data/"
+        "cache_dir": os.path.dirname(data_args.dataset_name)
     }
 
     if data_args.dataset_name:
@@ -336,11 +351,16 @@ def main():
         ) 
     logger.info(f"Loading local data from {data_args.dataset_name} ...")
     raw_datasets = load_dataset("json", data_files=data_files, **dataset_args)
-    logger.info(raw_datasets["train"])
+    logger.info(raw_datasets["train"], len(raw_datasets["train"]))
 
-    # for debuggng
-    # raw_datasets["train"] = raw_datasets["train"].select(range(1000000))
-    # print(raw_datasets["train"])
+    # For debuggng
+    if training_args.train_with_sample_size:
+        logger.info(f"Training with a sample of {training_args.train_with_sample_size}")
+        raw_datasets["train"] = raw_datasets["train"].select(range(training_args.train_with_sample_size))
+        logger.info("Train example", raw_datasets["train"][0])
+
+        raw_datasets["valid"] = raw_datasets["valid"].select(range(10))
+        logger.info("Valid example", raw_datasets["valid"][0])
 
     if model_args.tokenizer_name:
         tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
@@ -395,8 +415,8 @@ def main():
                 return_token_type_ids=False
                 )
         
-            target_encodings = [token_ids[1:] + [pad_token_id] for token_ids in batch_encodings["input_ids"]]
-            batch_encodings["labels"] = target_encodings
+            # Just make copy of the same list, shift will be applied during the cross-entropy loss
+            batch_encodings["labels"] = batch_encodings["input_ids"][:]
 
         return batch_encodings
             
@@ -447,6 +467,7 @@ def main():
     #         )
 
     model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
+
     logger.info(model)    
     n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
     logger.info(f"Training new model from scratch - Total size={n_params} or {n_params/2**20:.2f}M params")
@@ -511,6 +532,7 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()    
+
 
 if __name__ == "__main__":
     main()
