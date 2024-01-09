@@ -365,16 +365,6 @@ def main():
     if model_args.tokenizer_name:
         tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
 
-        # prepend and append an end-of-document symbol after each document
-        bos_token_id = tokenizer.token_to_id("<s>")
-        eos_token_id = tokenizer.token_to_id("</s>")
-        pad_token_id = tokenizer.token_to_id("<pad>")
- 
-        tokenizer.post_processor = processors.TemplateProcessing(
-            single=f"</s>:0 <s>:0 $A:0 </s>:0 </s>:0",
-            special_tokens=[("<s>", bos_token_id), ("</s>", eos_token_id)]
-        )
-
         # convert to Transformer's tokenizer
         tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer)
         tokenizer.pad_token = "<pad>"
