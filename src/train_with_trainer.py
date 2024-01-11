@@ -58,6 +58,7 @@ from transformers import (
 from transformers.testing_utils import CaptureLogger
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
+from transformers.utils.generic import PaddingStrategy
 from transformers.utils.versions import require_version
 
 from tokenizers import (
@@ -288,6 +289,79 @@ class CustomTrainingArguments(TrainingArguments):
     )
 
 
+class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    # overriding the method
+    def _pad(
+        self,
+        encoded_inputs,
+        max_length: Optional[int] = None,
+        padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
+        pad_to_multiple_of: Optional[int] = None,
+        return_attention_mask: Optional[bool] = None,
+    ) -> dict:
+        # Load from model defaults
+        if return_attention_mask is None:
+            return_attention_mask = "attention_mask" in self.model_input_names
+
+        required_input = encoded_inputs[self.model_input_names[0]]
+
+        if padding_strategy == PaddingStrategy.LONGEST:
+            max_length = len(required_input)
+
+        if max_length is not None and pad_to_multiple_of is not None and (max_length % pad_to_multiple_of != 0):
+            max_length = ((max_length // pad_to_multiple_of) + 1) * pad_to_multiple_of
+
+        needs_to_be_padded = padding_strategy != PaddingStrategy.DO_NOT_PAD and len(required_input) != max_length
+
+        # Initialize attention mask if not present.
+        if return_attention_mask and "attention_mask" not in encoded_inputs:
+            encoded_inputs["attention_mask"] = [1] * len(required_input)
+
+        if needs_to_be_padded:
+            difference = max_length - len(required_input)
+
+            if self.padding_side == "right":
+                if return_attention_mask:
+                    encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
+                if "token_type_ids" in encoded_inputs:
+                    encoded_inputs["token_type_ids"] = (
+                        encoded_inputs["token_type_ids"] + [self.pad_token_type_id] * difference
+                    )
+                # by overriding add dynamic padding for labels also     
+                if "labels" in encoded_inputs:
+                    encoded_inputs["labels"] = (
+                        encoded_inputs["labels"] + [self.pad_token_id] * difference
+                    )
+
+                if "special_tokens_mask" in encoded_inputs:
+                    encoded_inputs["special_tokens_mask"] = encoded_inputs["special_tokens_mask"] + [1] * difference
+                encoded_inputs[self.model_input_names[0]] = required_input + [self.pad_token_id] * difference
+            elif self.padding_side == "left":
+                if return_attention_mask:
+                    encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
+                if "token_type_ids" in encoded_inputs:
+                    encoded_inputs["token_type_ids"] = [self.pad_token_type_id] * difference + encoded_inputs[
+                        "token_type_ids"
+                    ]
+                if "special_tokens_mask" in encoded_inputs:
+                    encoded_inputs["special_tokens_mask"] = [1] * difference + encoded_inputs["special_tokens_mask"]
+
+                # by overriding add dynamic padding for labels also   
+                if "labels" in encoded_inputs:
+                    encoded_inputs["labels"] = (
+                        encoded_inputs["labels"] + [self.pad_token_id] * difference
+                    )
+
+                encoded_inputs[self.model_input_names[0]] = [self.pad_token_id] * difference + required_input
+            else:
+                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+
+        return encoded_inputs    
+
+
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
 
@@ -359,14 +433,15 @@ def main():
         raw_datasets["train"] = raw_datasets["train"].select(range(training_args.train_with_sample_size))
         logger.info("Train example", raw_datasets["train"][0])
 
-        raw_datasets["valid"] = raw_datasets["valid"].select(range(10))
+        valid_size = min(len(raw_datasets["valid"]), training_args.train_with_sample_size)
+        raw_datasets["valid"] = raw_datasets["valid"].select(range(valid_size))
         logger.info("Valid example", raw_datasets["valid"][0])
 
     if model_args.tokenizer_name:
         tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
 
         # convert to Transformer's tokenizer
-        tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer)
+        tokenizer = CustomPreTrainedTokenizerFast(tokenizer_object=tokenizer)
         tokenizer.pad_token = "<pad>"
 
         if len(tokenizer.get_vocab()) != config.vocab_size:
@@ -399,9 +474,6 @@ def main():
         with CaptureLogger(tok_logger) as cl:
             batch_encodings = tokenizer(
                 examples[text_column_name],
-                max_length=config.max_position_embeddings,
-                truncation=False,
-                padding="max_length",
                 return_token_type_ids=False
                 )
         
@@ -435,10 +507,10 @@ def main():
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
 
-    # data_collator_with_padding = DataCollatorWithPadding(
-    #     tokenizer=tokenizer, 
-    #     padding=True
-    #     )
+    data_collator_with_padding = DataCollatorWithPadding(
+        tokenizer=tokenizer, 
+        padding=True
+        )
 
     # # Detecting last checkpoint.
     # last_checkpoint = None
@@ -485,7 +557,6 @@ def main():
             # Flatten the tokens
             loss_fct = CrossEntropyLoss(reduction="none")
             loss = loss_fct(shift_logits.view(-1, shift_logits.shape[-1]), shift_labels.view(-1))
-            print("loss mean with hand", loss.mean())
 
             # pad_mask = labels != 1
             # loss = loss * pad_mask  # ignore pad tokens
@@ -497,7 +568,7 @@ def main():
     trainer = Trainer(
         model=model,
         args=training_args,
-        data_collator=default_data_collator,
+        data_collator=data_collator_with_padding,
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
