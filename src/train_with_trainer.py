@@ -367,6 +367,8 @@ def main():
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    training_args.gradient_checkpointing_kwargs={"use_reentrant": False}
+
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -408,6 +410,7 @@ def main():
         config.vocab_size = model_args.vocab_size or config.vocab_size 
         config.dropout = model_args.dropout if model_args.dropout is not None else config.dropout
         config.max_position_embeddings = model_args.max_position_embeddings or config.max_position_embeddings
+        config.use_cache = False
         logger.info(f"Overriding config: {config}") 
 
     # Dataset
@@ -427,7 +430,7 @@ def main():
     raw_datasets = load_dataset("json", data_files=data_files, **dataset_args)
     logger.info(raw_datasets["train"], len(raw_datasets["train"]))
 
-    # For debuggng
+    # For debugging
     if training_args.train_with_sample_size:
         logger.info(f"Training with a sample of {training_args.train_with_sample_size}")
         raw_datasets["train"] = raw_datasets["train"].select(range(training_args.train_with_sample_size))

@@ -1,8 +1,22 @@
+#!/bin/bash
+
+#SBATCH --job-name=MolgenTraining
+#SBATCH --cpus-per-task=30
+#SBATCH --gres=gpu:8
+#SBATCH --mem=100gb
+#SBATCH --time=30:00:00
+#SBATCH --nodes=1
+#SBATCH --output=logging/%x_%j.out
+#SBATCH --error=logging/%x_%j.err
+#SBATCH --nice=10
+
+
+
 accelerate launch --config_file ../accelerate_fsdp_config.yaml \
      ../src/train_with_trainer.py \
     --seed 1 \
-    --output_dir ../src/checkpoints/OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_hf \
-    --dataset_name ../src/data/data/data_bin_half_rand_sf_848M \
+    --output_dir ../src/checkpoints/OPT_1.2B_ep_1_half_rand_end_sf_848M_2.00E-04_hf_gradacc_32 \
+    --dataset_name ../src/data/data/data_bin_half_rand_end_sf_848M \
     --tokenizer_name ../src/data/tokenizers/tokenizer_sf/tokenizer.json \
     --resume_from_checkpoint "" \
     --do_train \
@@ -24,18 +38,19 @@ accelerate launch --config_file ../accelerate_fsdp_config.yaml \
     --learning_rate 2.00E-04 \
     --local_rank 0 \
     --log_on_each_node \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 32 \
     --preprocessing_num_workers 30 \
     --logging_steps 1 \
-    --eval_steps 100 \
+    --eval_steps 25 \
     --max_steps -1 \
-    --save_steps 1000 \
-    --warmup_steps 10352 \
+    --save_steps 250 \
+    --warmup_steps 2588 \
     --num_train_epochs 1 \
     --per_device_train_batch_size 128 \
     --per_device_eval_batch_size 128 \
     --report_to none \
     --save_safetensors False \
-    --aim_exp_name "OPT_1.2B_ep_1_half_rand_sf_848M_2.00E-04_bs_8x8x128_hf, grad_accum=8 [CANON]/[RAND] in the beginning, same batch size." \
+    --aim_exp_name "OPT_1.2B_ep_1_half_rand_end_sf_848M_2.00E-04_bs_8x32x128_hf, grad_accum=32 [CANON]/[RAND] in the end, but with 8 gpu." \
     --aim_repo_dir "../" \
-    --train_with_sample_size 0
+    --train_with_sample_size 0 \
+    --gradient_checkpointing False
