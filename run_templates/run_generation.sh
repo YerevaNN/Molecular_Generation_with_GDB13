@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=MolgenGen
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
 #SBATCH --mem=20gb
 #SBATCH --time=20:00
