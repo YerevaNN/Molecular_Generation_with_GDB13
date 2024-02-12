@@ -175,6 +175,14 @@ class ModelArguments:
             )
         },
     )
+    fine_tune_from: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The model checkpoint file path."
+            )
+        },
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -466,7 +474,7 @@ def main():
     if training_args.do_train:
         column_names = list(raw_datasets["train"].features)
     else:
-        column_names = list(raw_datasets["validation"].features)
+        column_names = list(raw_datasets["valid"].features)
 
     text_column_name = "text" if "text" in column_names else column_names[0]
 
@@ -515,23 +523,13 @@ def main():
         padding=True
         )
 
-    # # Detecting last checkpoint.
-    # last_checkpoint = None
-
-    # if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
-    #     last_checkpoint = get_last_checkpoint(training_args.output_dir)
-    #     if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-    #         raise ValueError(
-    #             f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-    #             "Use --overwrite_output_dir to overcome."
-    #         )
-    #     elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
-    #         logger.info(
-    #             f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
-    #             "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
-    #         )
-
     model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
+
+    if model_args.fine_tune_from:
+        logger.info(f"Fine-tuning from path {model_args.fine_tune_from}")
+        state_dict = torch.load(model_args.fine_tune_from, map_location="cpu")
+        model.load_state_dict(state_dict, False)
+        del state_dict
 
     logger.info(model)    
     n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
@@ -588,12 +586,9 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         else:
             logger.info("Training new model from scratch")    
-
-        # elif last_checkpoint is not None:
-        #     checkpoint = last_checkpoint
             
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        trainer.save_model()  # Saves the tokenizer too for easy upload
+        trainer.save_model()
 
         metrics = train_result.metrics
 

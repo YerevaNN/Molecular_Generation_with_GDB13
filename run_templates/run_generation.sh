@@ -4,15 +4,15 @@
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
 #SBATCH --mem=20gb
-#SBATCH --time=20:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
-#SBATCH --nice=1
 
-export MODEL="OPT_1.2B_ep_1_half_rand_end_sf_848M_2.00E-04_hf_gradacc_32"
-export ITERATION=10000
-export GEN_LEN=10000
+
+export MODEL="OPT_1.2B_ep_1_aspirin_0.4_sf_1000K_2.00E-05_hf"
+export ITERATION=3900
+export GEN_LEN=1000000
 export PROMPT="_" # [Canon] / [Rand]
 
 
