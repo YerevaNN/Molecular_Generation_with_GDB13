@@ -36,7 +36,7 @@ import datasets
 import evaluate
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from torch.nn import CrossEntropyLoss
 
 import transformers
@@ -422,94 +422,105 @@ def main():
         logger.info(f"Overriding config: {config}") 
 
     # Dataset
-    data_files = {}
-    dataset_args = {
-        "cache_dir": os.path.dirname(data_args.dataset_name)
-    }
-
-    if data_args.dataset_name:
-        data_files["train"] = glob.glob(f"{data_args.dataset_name}/train/00/*.jsonl")
-        data_files["valid"] = glob.glob(f"{data_args.dataset_name}/valid/00/*.jsonl")    
-    else:
-        raise ValueError(
-            "Dataset name is required."
-        ) 
-    logger.info(f"Loading local data from {data_args.dataset_name} ...")
-    raw_datasets = load_dataset("json", data_files=data_files, **dataset_args)
-    logger.info(raw_datasets["train"], len(raw_datasets["train"]))
-
-    # For debugging
-    if training_args.train_with_sample_size:
-        logger.info(f"Training with a sample of {training_args.train_with_sample_size}")
-        raw_datasets["train"] = raw_datasets["train"].select(range(training_args.train_with_sample_size))
-        logger.info("Train example", raw_datasets["train"][0])
-
-        valid_size = min(len(raw_datasets["valid"]), training_args.train_with_sample_size)
-        raw_datasets["valid"] = raw_datasets["valid"].select(range(valid_size))
-        logger.info("Valid example", raw_datasets["valid"][0])
-
-    if model_args.tokenizer_name:
-        tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
-
-        # convert to Transformer's tokenizer
-        tokenizer = CustomPreTrainedTokenizerFast(tokenizer_object=tokenizer)
-        tokenizer.pad_token = "<pad>"
-
-        if len(tokenizer.get_vocab()) != config.vocab_size:
-            i = len(tokenizer.get_vocab())
-
-            while i < config.vocab_size:
-                symbol = "madeupword{:03d}".format(i)
-            
-                tokenizer.add_tokens(symbol)
-                i += 1
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
-            "You can do it from another script, save it, and load it from here, using --tokenizer_name."
-        ) 
-
-    # Preprocessing the datasets.
-    # First we tokenize all the texts.
-    if training_args.do_train:
-        column_names = list(raw_datasets["train"].features)
-    else:
-        column_names = list(raw_datasets["valid"].features)
-
-    text_column_name = "text" if "text" in column_names else column_names[0]
-
-    # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
-    tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
-
-    def tokenize_function(examples):
-        with CaptureLogger(tok_logger) as cl:
-            batch_encodings = tokenizer(
-                examples[text_column_name],
-                return_token_type_ids=False
-                )
-        
-            # Just make copy of the same list, shift will be applied during the cross-entropy loss
-            batch_encodings["labels"] = batch_encodings["input_ids"][:]
-
-        return batch_encodings
-            
-
-    with training_args.main_process_first(desc="dataset map tokenization"):
-        if not data_args.streaming:
-            tokenized_datasets = raw_datasets.map(
-                tokenize_function,
-                batched=True,
-                num_proc=data_args.preprocessing_num_workers,
-                remove_columns=column_names,
-                load_from_cache_file=not data_args.overwrite_cache,
-                desc="Running tokenizer on dataset",
+    if os.path.exists(f"{data_args.dataset_name}_tokenized"):
+        logger.info(f"Loading local already tokenized data from {data_args.dataset_name}_tokenized ...")
+        tokenized_datasets = load_from_disk(
+            f"{data_args.dataset_name}_tokenized", 
+            keep_in_memory=None
             )
+    else:
+        data_files = {}
+        dataset_args = {
+            "cache_dir": os.path.dirname(data_args.dataset_name)
+        }
+
+        if data_args.dataset_name:
+            data_files["train"] = glob.glob(f"{data_args.dataset_name}/train/00/*.jsonl")
+            data_files["valid"] = glob.glob(f"{data_args.dataset_name}/valid/00/*.jsonl")    
         else:
-            tokenized_datasets = raw_datasets.map(
-                tokenize_function,
-                batched=True,
-                remove_columns=column_names,
-            )
+            raise ValueError(
+                "Dataset name is required."
+            ) 
+        logger.info(f"Loading local data from {data_args.dataset_name} ...")
+        raw_datasets = load_dataset("json", data_files=data_files, **dataset_args)
+        logger.info(raw_datasets["train"], len(raw_datasets["train"]))
+
+        # For debugging
+        if training_args.train_with_sample_size:
+            logger.info(f"Training with a sample of {training_args.train_with_sample_size}")
+            raw_datasets["train"] = raw_datasets["train"].select(range(training_args.train_with_sample_size))
+            logger.info("Train example", raw_datasets["train"][0])
+
+            valid_size = min(len(raw_datasets["valid"]), training_args.train_with_sample_size)
+            raw_datasets["valid"] = raw_datasets["valid"].select(range(valid_size))
+            logger.info("Valid example", raw_datasets["valid"][0])
+
+        if model_args.tokenizer_name:
+            tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
+
+            # convert to Transformer's tokenizer
+            tokenizer = CustomPreTrainedTokenizerFast(tokenizer_object=tokenizer)
+            tokenizer.pad_token = "<pad>"
+
+            if len(tokenizer.get_vocab()) != config.vocab_size:
+                i = len(tokenizer.get_vocab())
+
+                while i < config.vocab_size:
+                    symbol = "madeupword{:03d}".format(i)
+                
+                    tokenizer.add_tokens(symbol)
+                    i += 1
+        else:
+            raise ValueError(
+                "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
+                "You can do it from another script, save it, and load it from here, using --tokenizer_name."
+            ) 
+
+        # Preprocessing the datasets.
+        # First we tokenize all the texts.
+        if training_args.do_train:
+            column_names = list(raw_datasets["train"].features)
+        else:
+            column_names = list(raw_datasets["valid"].features)
+
+        text_column_name = "text" if "text" in column_names else column_names[0]
+
+        # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
+        tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
+
+        def tokenize_function(examples):
+            with CaptureLogger(tok_logger) as cl:
+                batch_encodings = tokenizer(
+                    examples[text_column_name],
+                    return_token_type_ids=False
+                    )
+            
+                # Just make copy of the same list, shift will be applied during the cross-entropy loss
+                batch_encodings["labels"] = batch_encodings["input_ids"][:]
+
+            return batch_encodings
+            
+
+        with training_args.main_process_first(desc="dataset map tokenization"):
+            if not data_args.streaming:
+                tokenized_datasets = raw_datasets.map(
+                    tokenize_function,
+                    batched=True,
+                    num_proc=data_args.preprocessing_num_workers,
+                    remove_columns=column_names,
+                    load_from_cache_file=not data_args.overwrite_cache,
+                    desc="Running tokenizer on dataset",
+                )
+            else:
+                tokenized_datasets = raw_datasets.map(
+                    tokenize_function,
+                    batched=True,
+                    remove_columns=column_names,
+                    load_from_cache_file=False,
+                    keep_in_memory=True
+                )
+
+        tokenized_datasets.save_to_disk(f"{data_args.dataset_name}_tokenized")           
 
     train_dataset, eval_dataset = tokenized_datasets["train"], tokenized_datasets["valid"]
 
