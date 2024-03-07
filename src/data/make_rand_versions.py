@@ -106,7 +106,12 @@ def read_lines_from_file(rand_number, input_file_name, output_file_name):
                         print(f"Sorry, too many iterations for finding all {rand_number} randomized versions for {selfies_str}, found {len(randomized_set)}.")
                         count += 1
                         number_to_copy = rand_number - len(randomized_set)
-                        copied_elements = list(randomized_set)[:number_to_copy]
+
+                        if number_to_copy > len(randomized_set):
+                            multiplied_randomized_list = number_to_copy * list(randomized_set)
+                            copied_elements = multiplied_randomized_list[:number_to_copy]
+                        else:    
+                            copied_elements = list(randomized_set)[:number_to_copy]
 
                         while copied_elements:
                             # Just copy first elements if there is no so many versions of randomized
