@@ -30,7 +30,8 @@ import random
 import warnings
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Optional
+from typing import Optional, List
+import datetime
 
 import datasets
 import evaluate
@@ -38,6 +39,8 @@ import torch
 import torch.nn.functional as F
 from datasets import load_dataset, load_from_disk
 from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader
+import torch.distributed as dist
 
 import transformers
 from transformers import (
@@ -46,6 +49,7 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    OPTForCausalLM,
     PreTrainedTokenizerFast,
     DataCollatorWithPadding,
     HfArgumentParser,
@@ -56,10 +60,14 @@ from transformers import (
     set_seed,
 )
 from transformers.testing_utils import CaptureLogger
-from transformers.trainer_utils import get_last_checkpoint
+from transformers.trainer_utils import get_last_checkpoint, seed_worker
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.generic import PaddingStrategy
 from transformers.utils.versions import require_version
+from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.utils.import_utils import is_datasets_available
+
+
 
 from tokenizers import (
         Tokenizer,
@@ -73,8 +81,6 @@ logger = logging.getLogger(__name__)
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
-
-
 
 
 @dataclass
@@ -295,6 +301,14 @@ class CustomTrainingArguments(TrainingArguments):
             )
         },
     )
+    train_with_min_loss_seq: bool = field(
+        default=False, 
+        metadata={
+            "help": (
+                "Whether to run training by minimizing only the smiles with minimum loss for one molecule."
+                )
+            }
+        )
 
 
 class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
@@ -370,6 +384,151 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
         return encoded_inputs    
 
 
+def molecularLoss(loss, batch_size, seq_len):
+    block_size = 8
+
+    # Shape (bs, seq_len) 
+    loss_molecular = loss.detach().clone().view(batch_size, -1)    
+
+    # Shape (bs), sum loss across the seq_len
+    loss_molecular = loss_molecular.sum(-1)
+
+    # Shape (batch_size//block_size, block_size) 
+    loss_molecular = loss_molecular.view(-1, block_size)
+
+    # Shape (batch_size//block_size)
+    non_zero_idexes = loss_molecular.min(dim=1, keepdim=False)[1]
+
+    # Creating a mask for loss
+    mask = torch.zeros(batch_size//block_size, block_size)
+    mask[torch.arange(mask.size(0)), non_zero_idexes] = 1
+
+    # Shape loss.shape
+    mask_unsqueezed = torch.repeat_interleave(mask.view(-1), seq_len)
+    mask_unsqueezed = mask_unsqueezed.to(loss.device)
+
+    # Mask loss
+    loss_masked = loss * mask_unsqueezed
+
+    return loss_masked
+     
+
+class CustomTrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def get_train_dataloader(self) -> DataLoader:
+        """
+        Returns the training [`~torch.utils.data.DataLoader`].
+
+        Will use no sampler if `train_dataset` does not implement `__len__`, a random sampler (adapted to distributed
+        training if necessary) otherwise.
+
+        Subclass and override this method if you want to inject some custom behavior.
+        """
+        if self.train_dataset is None:
+            raise ValueError("Trainer: training requires a train_dataset.")
+
+        train_dataset = self.train_dataset
+        data_collator = self.data_collator
+        if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
+            train_dataset = self._remove_unused_columns(train_dataset, description="training")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
+
+        dataloader_params = {
+            "batch_size": self._train_batch_size,
+            "collate_fn": data_collator,
+            "num_workers": self.args.dataloader_num_workers,
+            "pin_memory": self.args.dataloader_pin_memory,
+            "persistent_workers": self.args.dataloader_persistent_workers,
+        }
+
+        if not isinstance(train_dataset, torch.utils.data.IterableDataset):
+            # don't shuffle !!!
+            dataloader_params["sampler"] = self._get_eval_sampler(train_dataset)
+            dataloader_params["drop_last"] = self.args.dataloader_drop_last
+            dataloader_params["worker_init_fn"] = seed_worker
+
+        return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
+
+
+class CustomOPTForCausalLM(OPTForCausalLM):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    # overriding the method
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.model.decoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        logits = self.lm_head(outputs[0]).contiguous()
+
+        loss = None
+        if labels is not None:
+            # move labels to correct device to enable model parallelism
+            labels = labels.to(logits.device)
+
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss(reduction="none")
+
+            # Shape (bs x seq_len)
+            loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
+
+            batch_size = labels.shape[0]
+            seq_len = shift_logits.shape[1]
+
+            # Shape (bs x seq_len)
+            loss = molecularLoss(loss, batch_size, seq_len)
+
+            loss = loss.mean()
+
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
 
@@ -403,9 +562,9 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Output file 
-    if os.path.exists(training_args.output_dir):
-        print(f"{training_args.output_dir} already exists")
-        sys.exit(1)
+    # if os.path.exists(training_args.output_dir):
+    #     print(f"{training_args.output_dir} already exists")
+    #     sys.exit(1)
 
     # Initialize aim_callback
     aim_callback = None
@@ -539,7 +698,13 @@ def main():
         padding=True
         )
 
-    model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
+    if training_args.train_with_min_loss_seq:
+        logger.info(f"Train with Custom Loss")  
+        model = CustomOPTForCausalLM(config)
+    else:  
+        logger.info(f"Train with Regular Loss")  
+        model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
+
 
     if model_args.fine_tune_from:
         logger.info(f"Fine-tuning from path {model_args.fine_tune_from}")
@@ -575,24 +740,32 @@ def main():
             loss_fct = CrossEntropyLoss(reduction="none")
             loss = loss_fct(shift_logits.view(-1, shift_logits.shape[-1]), shift_labels.view(-1))
 
+            if training_args.train_with_min_loss_seq:
+                # get only min loss values within sequential 8 blocks
+                batch_size = labels.shape[0]
+                seq_len = shift_logits.shape[1]
+
+                # Shape scalar, return the mean number
+                loss = molecularLoss(loss, batch_size, seq_len)
+
             # pad_mask = labels != 1
             # loss = loss * pad_mask  # ignore pad tokens
             # comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
             comp_perp = base ** (loss.mean() / math.log(2))
             return {"ppl": comp_perp.item()}
 
-    # Initialize our Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        data_collator=data_collator_with_padding,
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
-        tokenizer=tokenizer,
-        compute_metrics=compute_perplexity if training_args.do_eval else None,
-        callbacks=[aim_callback],
-        preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-    )
+    # Initialize our Trainer     
+        trainer = CustomTrainer(
+            model=model,
+            args=training_args,
+            data_collator=data_collator_with_padding,
+            train_dataset=train_dataset if training_args.do_train else None,
+            eval_dataset=eval_dataset if training_args.do_eval else None,
+            tokenizer=tokenizer,
+            compute_metrics=compute_perplexity if training_args.do_eval else None,
+            callbacks=[aim_callback],
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+        )
 
     # Training
     if training_args.do_train:
