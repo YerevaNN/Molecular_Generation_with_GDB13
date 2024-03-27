@@ -740,14 +740,6 @@ def main():
             loss_fct = CrossEntropyLoss(reduction="none")
             loss = loss_fct(shift_logits.view(-1, shift_logits.shape[-1]), shift_labels.view(-1))
 
-            if training_args.train_with_min_loss_seq:
-                # get only min loss values within sequential 8 blocks
-                batch_size = labels.shape[0]
-                seq_len = shift_logits.shape[1]
-
-                # Shape scalar, return the mean number
-                loss = molecularLoss(loss, batch_size, seq_len)
-
             # pad_mask = labels != 1
             # loss = loss * pad_mask  # ignore pad tokens
             # comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
