@@ -7,7 +7,7 @@ __pycache__/
 *$py.class
 
 # Train/valid data
-src/data/data
+src/data/data/
 
 # VSCODE
 .vscode/ftp-sync.json
@@ -27,3 +27,4 @@ tensorboard
 wandb
 .aim
 logging
+logging_old
