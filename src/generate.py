@@ -65,7 +65,7 @@ def main():
     for i in tqdm(range(math.ceil(args.gen_len / args.batch_size))):
 
         # Generate
-        generate_ids = model.generate(prompt_data, max_length=64, do_sample=True)
+        generate_ids = model.generate(prompt_data, max_length=64, do_sample=True, top_k=len(tokenizer.get_vocab()))
         outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
         
         # Write in a file

@@ -181,7 +181,7 @@ class ModelArguments:
             )
         },
     )
-    fine_tune_from: Optional[str] = field(
+    finetune_from_checkpoint: Optional[str] = field(
         default=None,
         metadata={
             "help": (
@@ -527,6 +527,14 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+    
+def get_normalized_probs(logits, log_probs, sample=None):
+        """Get normalized probabilities (or log probs) from a net's output."""
+        if torch.is_tensor(logits):
+            if log_probs:
+                return F.log_softmax(logits, dim=-1)
+            else:
+                return F.softmax(logits, dim=-1)    
 
 
 def main():
@@ -706,9 +714,9 @@ def main():
         model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
 
 
-    if model_args.fine_tune_from:
-        logger.info(f"Fine-tuning from path {model_args.fine_tune_from}")
-        state_dict = torch.load(model_args.fine_tune_from, map_location="cpu")
+    if model_args.finetune_from_checkpoint:
+        logger.info(f"Fine-tuning from path {model_args.finetune_from_checkpoint}")
+        state_dict = torch.load(model_args.finetune_from_checkpoint, map_location="cpu")
         model.load_state_dict(state_dict, False)
         del state_dict
 
@@ -732,19 +740,34 @@ def main():
             labels = torch.LongTensor(labels)
 
             labels = labels.to(logits.device)
-            # Shift so that tokens < n predict n
+            # Shift so that tokens < n predict n, shape(bs, seq_len, vocab_size)
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
 
-            # Flatten the tokens
-            loss_fct = CrossEntropyLoss(reduction="none")
-            loss = loss_fct(shift_logits.view(-1, shift_logits.shape[-1]), shift_labels.view(-1))
+            # Flatten, shape(bs x seq_len, vocab_size)
+            flat_logits = shift_logits.view(-1, shift_logits.shape[-1])
+            flat_labels = shift_labels.view(-1)
 
-            # pad_mask = labels != 1
-            # loss = loss * pad_mask  # ignore pad tokens
-            # comp_perp = base ** (loss.sum() / pad_mask.sum() / math.log(2))
-            comp_perp = base ** (loss.mean() / math.log(2))
-            return {"ppl": comp_perp.item()}
+            # Compute loss, shape(bs x seq_len)
+            loss_fct = CrossEntropyLoss(reduction="none")
+            loss = loss_fct(flat_logits, flat_labels)
+
+            # Compute PPL
+            ppl = base ** (loss.mean() / math.log(2))
+
+            # Compute the Sum of Probabilities, shape(bs x seq_len, vocab_size)
+            normalized_log_logits = get_normalized_probs(flat_logits, log_probs=True)
+            normalized_logits = get_normalized_probs(flat_logits, log_probs=False)
+
+            # Log probabilities, shape(bs x seq_len)
+            logits_log_selected = normalized_log_logits[torch.arange(normalized_log_logits.shape[0]), flat_labels]
+            logits_selected = normalized_logits[torch.arange(normalized_logits.shape[0]), flat_labels]
+            sum_log_probs = torch.sum(logits_log_selected)
+            sum_probs = torch.sum(logits_selected)
+            sum_probs_logs = torch.exp(sum_log_probs)
+
+            return {"ppl": ppl.item(), "sum_of_probs": sum_probs_logs.item(), "sum_of_probs_without_log": sum_probs.item()}
+
 
     # Initialize our Trainer     
         trainer = CustomTrainer(
