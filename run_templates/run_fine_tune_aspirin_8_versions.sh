@@ -43,7 +43,6 @@ accelerate launch --config_file ../accelerate_fsdp_config_2.yaml \
     --adam_beta2 0.95 \
     --weight_decay 0.1 \
     --dataloader_num_workers 1 \
-    --dataloader_drop_last \
     --dataloader_pin_memory \
     --preprocessing_num_workers 20 \
     --gradient_accumulation_steps $GRAD_ACC \

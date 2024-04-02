@@ -593,16 +593,28 @@ def main():
 
             # Compute the Sum of Probabilities, shape(bs x seq_len, vocab_size)
             normalized_log_logits = get_normalized_probs(flat_logits, log_probs=True)
-            normalized_logits = get_normalized_probs(flat_logits, log_probs=False)
 
             # Log probabilities, shape(bs x seq_len)
             logits_log_selected = normalized_log_logits[torch.arange(normalized_log_logits.shape[0]), flat_labels]
-            logits_selected = normalized_logits[torch.arange(normalized_logits.shape[0]), flat_labels]
-            sum_log_probs = torch.sum(logits_log_selected)
-            sum_probs = torch.sum(logits_selected)
-            sum_probs_logs = torch.exp(sum_log_probs)
 
-            return {"ppl": ppl.item(), "sum_of_probs": sum_probs_logs.item(), "sum_of_probs_without_log": sum_probs.item()}
+            # Make float64 for high precision, shape(bs x seq_len)
+            logits_log_selected = logits_log_selected.double()
+
+            # Reshape, otherwise the sum of the all log probabilities would be too small, shape(bs, seq_len)
+            logits_log_selected = logits_log_selected.reshape(logits.shape[0], -1)
+
+            # Sum through each sequence lenght, shape(bs)
+            sum_log_probs = torch.sum(logits_log_selected, dim=-1)
+
+            # Return to probabilities, shape(bs)
+            sum_probs_through_seq = torch.exp(sum_log_probs)
+
+            # Sum, shape(1)
+            sum_probs = torch.sum(sum_probs_through_seq)
+            
+            logger.info("sum_of_probs", sum_probs.item()*1e6)
+
+            return {"ppl": ppl.item(), "sum_of_probs": sum_probs.item()*1e6}
 
     # Initialize our Trainer
     trainer = Trainer(
