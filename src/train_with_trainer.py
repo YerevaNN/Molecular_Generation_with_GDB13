@@ -603,6 +603,10 @@ def main():
             # Reshape, otherwise the sum of the all log probabilities would be too small, shape(bs, seq_len)
             logits_log_selected = logits_log_selected.reshape(logits.shape[0], -1)
 
+            # Replace id=-100 (as HF padding) log-probabilities to 0
+            for batch_i in range(logits_log_selected.shape[0]):
+                logits_log_selected[batch_i][shift_labels[batch_i] == -100] = 0
+
             # Sum through each sequence lenght, shape(bs)
             sum_log_probs = torch.sum(logits_log_selected, dim=-1)
 
