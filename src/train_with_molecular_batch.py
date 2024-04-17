@@ -301,11 +301,19 @@ class CustomTrainingArguments(TrainingArguments):
             )
         },
     )
-    train_with_min_loss_seq: bool = field(
-        default=False, 
+    loss_type: str = field(
+        default="", 
         metadata={
             "help": (
-                "Whether to run training by minimizing only the smiles with minimum loss for one molecule."
+                "Whether to run training by minimizing only the smiles with min/max/mean loss for one molecule."
+                )
+            }
+        )
+    shuffle_train: bool = field(
+        default=True, 
+        metadata={
+            "help": (
+                "Whether to shuffle the train dataset. Don't do that with min/max losses."
                 )
             }
         )
@@ -384,7 +392,7 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
         return encoded_inputs    
 
 
-def molecularLoss(loss, batch_size, seq_len):
+def molecularLoss(loss, batch_size, seq_len, loss_type="min"):
     block_size = 8
 
     # Shape (bs, seq_len) 
@@ -396,8 +404,14 @@ def molecularLoss(loss, batch_size, seq_len):
     # Shape (batch_size//block_size, block_size) 
     loss_molecular = loss_molecular.view(-1, block_size)
 
-    # Shape (batch_size//block_size)
-    non_zero_idexes = loss_molecular.min(dim=1, keepdim=False)[1]
+    if loss_type == "min":
+        # Shape (batch_size//block_size)
+        non_zero_idexes = loss_molecular.min(dim=1, keepdim=False)[1]
+    elif loss_type == "max":
+        # Shape (batch_size//block_size)
+        non_zero_idexes = loss_molecular.max(dim=1, keepdim=False)[1]
+    else:
+        raise ValueError("The loss_type value must be from the (min, max, mean) set.")    
 
     # Creating a mask for loss
     mask = torch.zeros(batch_size//block_size, block_size)
@@ -415,6 +429,7 @@ def molecularLoss(loss, batch_size, seq_len):
 
 class CustomTrainer(Trainer):
     def __init__(self, *args, **kwargs):
+        self.shuffle_train = kwargs.pop("shuffle_train") 
         super().__init__(*args, **kwargs)
     
     def get_train_dataloader(self) -> DataLoader:
@@ -445,8 +460,12 @@ class CustomTrainer(Trainer):
         }
 
         if not isinstance(train_dataset, torch.utils.data.IterableDataset):
-            # don't shuffle !!!
-            dataloader_params["sampler"] = self._get_eval_sampler(train_dataset)
+            if self.shuffle_train:
+                dataloader_params["sampler"] = self._get_train_sampler()
+            else:     
+                # don't shuffle !!!
+                dataloader_params["sampler"] = self._get_eval_sampler(train_dataset)
+
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
             dataloader_params["worker_init_fn"] = seed_worker
 
@@ -455,8 +474,10 @@ class CustomTrainer(Trainer):
 
 class CustomOPTForCausalLM(OPTForCausalLM):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        self.loss_type = kwargs.pop("loss_type", "mean")
 
+        super().__init__(*args, **kwargs)
+        
     # overriding the method
     def forward(
         self,
@@ -511,8 +532,9 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             batch_size = labels.shape[0]
             seq_len = shift_logits.shape[1]
 
-            # Shape (bs x seq_len)
-            loss = molecularLoss(loss, batch_size, seq_len)
+            if self.loss_type != "mean":
+                # Shape (bs x seq_len)
+                loss = molecularLoss(loss, batch_size, seq_len, loss_type=self.loss_type)
 
             loss = loss.mean()
 
@@ -570,9 +592,9 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Output file 
-    # if os.path.exists(training_args.output_dir):
-    #     print(f"{training_args.output_dir} already exists")
-    #     sys.exit(1)
+    if os.path.exists(training_args.output_dir):
+        print(f"{training_args.output_dir} already exists")
+        sys.exit(1)
 
     # Initialize aim_callback
     aim_callback = None
@@ -706,13 +728,8 @@ def main():
         padding=True
         )
 
-    if training_args.train_with_min_loss_seq:
-        logger.info(f"Train with Custom Loss")  
-        model = CustomOPTForCausalLM(config)
-    else:  
-        logger.info(f"Train with Regular Loss")  
-        model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
-
+    logger.info(f"Train with {training_args.loss_type} Loss")  
+    model = CustomOPTForCausalLM(config, loss_type=training_args.loss_type)
 
     if model_args.finetune_from_checkpoint:
         logger.info(f"Fine-tuning from path {model_args.finetune_from_checkpoint}")
@@ -785,7 +802,7 @@ def main():
             return {"ppl": ppl.item(), "sum_of_probs": sum_probs.item()*1e6}
         
     # Initialize our Trainer     
-        trainer = CustomTrainer(
+    trainer = CustomTrainer(
             model=model,
             args=training_args,
             data_collator=data_collator_with_padding,
@@ -795,6 +812,7 @@ def main():
             compute_metrics=compute_perplexity if training_args.do_eval else None,
             callbacks=[aim_callback],
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+            shuffle_train=training_args.shuffle_train
         )
 
     # Training
