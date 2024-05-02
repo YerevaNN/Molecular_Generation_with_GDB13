@@ -1,31 +1,32 @@
 #!/bin/bash
 
-#SBATCH --job-name=MolgenTrain
+#SBATCH --job-name=PreTrain125m
 #SBATCH --cpus-per-task=30
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:4
 #SBATCH --mem=100gb
-#SBATCH --time=24:00:00
+#SBATCH --time=72:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
 
 export LR="4.00E-04"
 export BS="128"
-export MODEL="OPT_1.2B_ep_1_all_rand_sf_848M"
-export GRAD_ACC="32"
+export MODEL="OPT_125m_ep_1_all_canon_sf_848M"
+export GRAD_ACC="64"
+export LOSS_TYPE="mean"
 
 
 accelerate launch --config_file ../accelerate_fsdp_config.yaml \
-     ../src/train_with_trainer.py \
+     ../src/train_with_molecular_batch.py \
     --seed 1 \
-    --output_dir ../src/checkpoints/$MODEL"_"$LR"_"hf_gradacc_$GRAD_ACC \
-    --dataset_name ../src/data/data/data_bin_all_rand_sf_848M \
+    --output_dir ../src/checkpoints/pre_trained/$MODEL \
+    --dataset_name ../src/data/data/data_bin_all_canon_sf_848M \
     --tokenizer_name ../src/data/tokenizers/tokenizer_sf/tokenizer.json \
     --resume_from_checkpoint "" \
     --do_train \
     --do_eval \
     --evaluation_strategy steps \
-    --config_name facebook/opt-1.3B \
+    --config_name facebook/opt-125m \
     --max_position_embeddings 64 \
     --dropout 0.0 \
     --vocab_size 192 \
@@ -44,7 +45,7 @@ accelerate launch --config_file ../accelerate_fsdp_config.yaml \
     --gradient_accumulation_steps $GRAD_ACC \
     --preprocessing_num_workers 30 \
     --logging_steps 1 \
-    --eval_steps 100 \
+    --eval_steps 1000 \
     --max_steps -1 \
     --save_steps 250 \
     --warmup_steps 2588 \
@@ -53,7 +54,10 @@ accelerate launch --config_file ../accelerate_fsdp_config.yaml \
     --per_device_eval_batch_size $BS \
     --report_to none \
     --save_safetensors False \
-    --aim_exp_name "$MODEL"_"$LR"_"bs_8x$GRAD_ACC"x"$BS"_"hf, lr=$LR." \
+    --aim_exp_name "$MODEL"_"$LR"_"bs_4x$GRAD_ACC"x"$BS"_"hf, lr=$LR, pre-train 125m model." \
     --aim_repo_dir "../" \
     --train_with_sample_size 0 \
-    --gradient_checkpointing False
+    --gradient_checkpointing False \
+    --save_total_limit 1 \
+    --loss_type $LOSS_TYPE \
+    --shuffle_train True

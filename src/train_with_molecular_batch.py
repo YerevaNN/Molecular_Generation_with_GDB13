@@ -535,8 +535,9 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             if self.loss_type != "mean":
                 # Shape (bs x seq_len)
                 loss = molecularLoss(loss, batch_size, seq_len, loss_type=self.loss_type)
-
-            loss = loss.mean()
+                loss = torch.sum(loss) / batch_size
+            else:    
+                loss = loss.mean()
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -766,11 +767,11 @@ def main():
             flat_labels = shift_labels.view(-1)
 
             # Compute loss, shape(bs x seq_len)
-            loss_fct = CrossEntropyLoss(reduction="none")
+            loss_fct = CrossEntropyLoss()
             loss = loss_fct(flat_logits, flat_labels)
 
             # Compute PPL
-            ppl = base ** (loss.mean() / math.log(2))
+            ppl = base ** (loss / math.log(2))
 
             # Compute the Sum of Probabilities, shape(bs x seq_len, vocab_size)
             normalized_log_logits = get_normalized_probs(flat_logits, log_probs=True)

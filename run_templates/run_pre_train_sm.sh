@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=30
 #SBATCH --gres=gpu:4
 #SBATCH --mem=100gb
-#SBATCH --time=72:00:00
+#SBATCH --time=80:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
@@ -22,7 +22,7 @@ export LOSS_TYPE="mean"
 accelerate launch --config_file ../accelerate_fsdp_config_4gpu.yaml \
      ../src/train_with_molecular_batch.py \
     --seed 1 \
-    --output_dir ../src/checkpoints/pre_train/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M\
+    --output_dir ../src/checkpoints/pre_trained/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M \
     --dataset_name ../src/data/data/data_bin_all_$PRE_TRAIN"_"$MOL_REPR"_848M" \
     --tokenizer_name ../src/data/tokenizers/tokenizer_$MOL_REPR/tokenizer.json \
     --resume_from_checkpoint "" \
@@ -61,5 +61,6 @@ accelerate launch --config_file ../accelerate_fsdp_config_4gpu.yaml \
     --aim_repo_dir "../" \
     --train_with_sample_size 0 \
     --gradient_checkpointing False \
+    --save_total_limit 1 \
     --loss_type $LOSS_TYPE \
     --shuffle_train True
