@@ -392,39 +392,33 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
         return encoded_inputs    
 
 
-def molecularLoss(loss, batch_size, seq_len, loss_type="min"):
+def molecularLoss(loss, batch_size, loss_type):
     block_size = 8
 
     # Shape (bs, seq_len) 
-    loss_molecular = loss.detach().clone().view(batch_size, -1)    
+    loss_molecular = loss.view(batch_size, -1)    
 
-    # Shape (bs), sum loss across the seq_len
-    loss_molecular = loss_molecular.sum(-1)
+    # Shape (bs), mean loss across the seq_len
+    loss_molecular_by_seq = loss_molecular.mean(-1)
 
     # Shape (batch_size//block_size, block_size) 
-    loss_molecular = loss_molecular.view(-1, block_size)
+    loss_molecular_by_blocks = loss_molecular_by_seq.view(-1, block_size)
 
     if loss_type == "min":
-        # Shape (batch_size//block_size)
-        non_zero_idexes = loss_molecular.min(dim=1, keepdim=False)[1]
+        # Shape (2)
+        loss_molecular_mean_by_batch = loss_molecular_by_blocks.min(dim=1, keepdim=False).values
     elif loss_type == "max":
-        # Shape (batch_size//block_size)
-        non_zero_idexes = loss_molecular.max(dim=1, keepdim=False)[1]
+        # Shape (2)
+        loss_molecular_mean_by_batch = loss_molecular_by_blocks.max(dim=1, keepdim=False).values
+    elif loss_type == "mean":
+        # Shape (2)
+        loss_molecular_mean_by_batch = loss_molecular_by_blocks.mean(dim=1, keepdim=False)
     else:
         raise ValueError("The loss_type value must be from the (min, max, mean) set.")    
 
-    # Creating a mask for loss
-    mask = torch.zeros(batch_size//block_size, block_size)
-    mask[torch.arange(mask.size(0)), non_zero_idexes] = 1
+    loss_mean = loss_molecular_mean_by_batch.mean()
 
-    # Shape loss.shape
-    mask_unsqueezed = torch.repeat_interleave(mask.view(-1), seq_len)
-    mask_unsqueezed = mask_unsqueezed.to(loss.device)
-
-    # Mask loss
-    loss_masked = loss * mask_unsqueezed
-
-    return loss_masked
+    return loss_mean
      
 
 class CustomTrainer(Trainer):
@@ -523,21 +517,19 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
 
-            # Flatten the tokens
+            # Flatten the tokens, its OK to put reduction="none" as there are no -100s
             loss_fct = CrossEntropyLoss(reduction="none")
 
             # Shape (bs x seq_len)
             loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
 
             batch_size = labels.shape[0]
-            seq_len = shift_logits.shape[1]
 
-            if self.loss_type != "mean":
-                # Shape (bs x seq_len)
-                loss = molecularLoss(loss, batch_size, seq_len, loss_type=self.loss_type)
-                loss = torch.sum(loss) / batch_size
-            else:    
+            # Shape (1)
+            if self.loss_type == "mean":
                 loss = loss.mean()
+            else:
+                loss = molecularLoss(loss, batch_size, loss_type=self.loss_type)
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -766,9 +758,22 @@ def main():
             flat_logits = shift_logits.view(-1, shift_logits.shape[-1])
             flat_labels = shift_labels.view(-1)
 
+            # Shape(bs x seq_len, vocab_size)
+            mask_labels = (flat_labels != 1) & (flat_labels != -100)
+            # Shape(bs x seq_len)
+            mask_logits = mask_labels.unsqueeze(1).repeat_interleave(flat_logits.shape[-1], dim=-1)
+
+            # Shape(bs x seq_len x vocab_size)
+            flat_logits_reduced = flat_logits[mask_logits]
+            # Shape(bs x seq_len, vocab_size)
+            flat_logits_reduced = flat_logits_reduced.view(-1, flat_logits.shape[-1])
+            # Shape(bs x seq_len)
+            flat_labels_reduced = flat_labels[mask_labels]
+
             # Compute loss, shape(bs x seq_len)
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(flat_logits, flat_labels)
+            loss_fct = CrossEntropyLoss(reduction="mean")
+
+            loss = loss_fct(flat_logits_reduced, flat_labels_reduced)
 
             # Compute PPL
             ppl = base ** (loss / math.log(2))
@@ -789,7 +794,7 @@ def main():
             for batch_i in range(logits_log_selected.shape[0]):
                 logits_log_selected[batch_i][shift_labels[batch_i] == -100] = 0
 
-            # Sum through each sequence lenght, shape(bs)
+            # Sum through each sequence length, shape(bs)
             sum_log_probs = torch.sum(logits_log_selected, dim=-1)
 
             # Return to probabilities, shape(bs)
