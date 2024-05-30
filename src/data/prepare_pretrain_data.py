@@ -110,13 +110,18 @@ def randomize_selfies(selfies_str: str, random_type="restricted"):
     return rand_selfies_str 
 
 
-def process_fn(line_str, prefix, suffix, rand):
+def process_fn(line_str, prefix, suffix, rand, repr):
     try:
         line_obj = json.loads(line_str)
 
         selfies_str = line_obj["text"]
         if rand:
-            proceed_selfies_str = randomize_selfies(selfies_str)
+            if repr == "sf":
+                proceed_selfies_str = randomize_selfies(selfies_str)
+            elif repr == "sm": 
+                proceed_selfies_str = randomize_smiles(selfies_str)
+            else:
+                raise ValueError("Choose Repr value.")      
         else:
             proceed_selfies_str = selfies_str    
 
@@ -132,7 +137,7 @@ def process_fn(line_str, prefix, suffix, rand):
     return None             
 
 
-def read_lines_from_file(start_line, num_lines, input_file_name, output_file_name, prefix, suffix, rand):
+def read_lines_from_file(start_line, num_lines, input_file_name, output_file_name, prefix, suffix, rand, repr):
     start_time = time.time()
 
     with open(input_file_name, 'r') as file:
@@ -149,7 +154,7 @@ def read_lines_from_file(start_line, num_lines, input_file_name, output_file_nam
                 if line is None: 
                     break
     
-                proceed_line = process_fn(line, prefix, suffix, rand)  
+                proceed_line = process_fn(line, prefix, suffix, rand, repr)  
     
                 if proceed_line:
                     json.dump(proceed_line, file_2)
@@ -161,6 +166,7 @@ def main():
 
     parser.add_argument('--start', type=int, help='Start line in the file.')
     parser.add_argument('--increment', type=int, help='Chunk size.')
+    parser.add_argument('--repr', type=str, help='sm or sf.')
     parser.add_argument('--input_file', type=str, help='Path to the input file')
     parser.add_argument('--output_file', type=str, help='Path to the output file')
     parser.add_argument('--prefix', default="", type=str, help='Can be any, but we use [Canon] / [Rand]')
@@ -169,6 +175,7 @@ def main():
     args = parser.parse_args()
     
     start = args.start
+    repr = args.repr
     rand = args.rand
     increment = args.increment
     input_file_path = args.input_file
@@ -178,7 +185,7 @@ def main():
 
     print("Processing file: ", input_file_path)
     start_time=time.time()
-    read_lines_from_file(start, increment, input_file_path, output_file_path, prefix, suffix, rand)
+    read_lines_from_file(start, increment, input_file_path, output_file_path, prefix, suffix, rand, repr)
 
     print(time.time()-start_time)  
 

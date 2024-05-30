@@ -3,19 +3,21 @@ import glob
 import json
 
 def remove_empty(input_file, output_file):
+    print("Reading from file", input_file)
+    
     with open(input_file, 'r') as infile:
         with open(output_file, 'w') as outfile:
             for i, line in tqdm(enumerate(infile)):
-                if line.strip()=="":
-                    print(i)
+                if line.strip() == "":
+                    print("Empty line at", i)
                 else:    
                     outfile.write(line)
                        
 
 
 if __name__ == "__main__":
-    input_file = "train_half_rand_sf_848M.jsonl"
-    output_file = "train_half_rand_sf_848M_no_empty.jsonl"
+    input_file = "../src/data/data/train_all_rand_sm_848M.jsonl"
+    output_file = "../src/data/data/train_all_rand_sm_848M_no_empty.jsonl"
 
     remove_empty(input_file, output_file)
 
