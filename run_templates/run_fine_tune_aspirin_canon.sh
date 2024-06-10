@@ -20,12 +20,13 @@ export GRAD_ACC=1
 export BS_TRAIN=256
 export BS_VALID=128
 export WARMUP=391
+export MODEL_SIZE="125m"
 
 
-for LR in "16.00E-05" "8.00E-05" "12.00E-05"
+for LR in "16.00E-05"
 do
 accelerate launch --config_file ../accelerate_fsdp_config_4.yaml \
-     ../src/train_with_trainer.py \
+     ../src/train_with_molecular_batch.py \
     --resume_from_checkpoint "" \
     --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
     --dataset_name ../src/data/data/data_bin_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF \

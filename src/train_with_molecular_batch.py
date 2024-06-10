@@ -305,7 +305,7 @@ class CustomTrainingArguments(TrainingArguments):
         default="", 
         metadata={
             "help": (
-                "Whether to run training by minimizing only the smiles with min/max/mean loss for one molecule."
+                "Whether to run training by minimizing only the smiles with min/max/mean/recall loss for one molecule."
                 )
             }
         )
@@ -392,33 +392,66 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
         return encoded_inputs    
 
 
-def molecularLoss(loss, batch_size, loss_type):
+def molecularLoss(shift_logits, shift_labels, loss_type="mean"):
     block_size = 8
+    gen_count = 1000
+    batch_size = shift_labels.shape[0]
 
-    # Shape (bs, seq_len) 
-    loss_molecular = loss.view(batch_size, -1)    
+    # Shape (batch_size x seq_len, vocab_size)
+    flat_logits = shift_logits.view(-1, shift_logits.shape[-1])
+    # Shape (batch_size x seq_len)
+    flat_labels = shift_labels.view(-1)
 
-    # Shape (bs), mean loss across the seq_len
-    loss_molecular_by_seq = loss_molecular.mean(-1)
+    # It's OK to put reduction="none" as there are no -100s, it counts paddings
+    ce_loss_fn = CrossEntropyLoss(reduction="none", ignore_index=-100)
 
-    # Shape (batch_size//block_size, block_size) 
-    loss_molecular_by_blocks = loss_molecular_by_seq.view(-1, block_size)
+    # Shape (batch_size x seq_len)    
+    nll = ce_loss_fn(flat_logits, flat_labels)
+    
+    if loss_type == "mean":
+        return nll.mean()
+    
+    # Shape (batch_size, seq_len) 
+    nll = nll.view(batch_size, -1)
+
+    # Shape (batch_size), mean?? through each sequence length, pad probability was also calculated???
+    nll_by_seq = nll.mean(dim=-1)
+
+    # Shape (batch_size / block_size, block_size)
+    nll_by_blocks = nll_by_seq.view(-1, block_size)
 
     if loss_type == "min":
         # Shape (2)
-        loss_molecular_mean_by_batch = loss_molecular_by_blocks.min(dim=1, keepdim=False).values
+        loss_molecular = nll_by_blocks.min(dim=-1, keepdim=False).values
+        return loss_molecular.mean()
     elif loss_type == "max":
         # Shape (2)
-        loss_molecular_mean_by_batch = loss_molecular_by_blocks.max(dim=1, keepdim=False).values
-    elif loss_type == "mean":
-        # Shape (2)
-        loss_molecular_mean_by_batch = loss_molecular_by_blocks.mean(dim=1, keepdim=False)
+        loss_molecular = nll_by_blocks.max(dim=-1, keepdim=False).values
+        return loss_molecular.mean()
+    elif loss_type == "recall":
+        # Shape (batch_size), sum through each sequence length
+        nll_by_seq = nll.sum(dim=-1)
+
+        nll_by_blocks = nll_by_seq.view(-1, block_size)
+
+        # Make float64 for high precision, shape (batch_size / block_size, block_size) 
+        nll_by_blocks = nll_by_blocks.double()
+
+        # Revert to log likelihood, shape (batch_size / block_size, block_size) 
+        loglikelihood_by_blocks = -nll_by_blocks
+
+        # Return to probabilities, shape(batch_size)
+        prob_by_blocks = torch.exp(loglikelihood_by_blocks)
+
+        sum_probs_by_block = torch.sum(prob_by_blocks, dim=-1)
+        one_tensor = torch.tensor([1.], dtype=torch.float64).to(sum_probs_by_block.device)
+        
+        # Recall loss
+        recall_by_molecule = one_tensor - (one_tensor - sum_probs_by_block)**gen_count
+        loss_molecular = -torch.log(torch.sum(recall_by_molecule))
+        return loss_molecular
     else:
-        raise ValueError("The loss_type value must be from the (min, max, mean) set.")    
-
-    loss_mean = loss_molecular_mean_by_batch.mean()
-
-    return loss_mean
+        raise ValueError("The loss_type value must be from the (min, max, mean, recall) set.")    
      
 
 class CustomTrainer(Trainer):
@@ -516,20 +549,8 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-
-            # Flatten the tokens, its OK to put reduction="none" as there are no -100s
-            loss_fct = CrossEntropyLoss(reduction="none")
-
-            # Shape (bs x seq_len)
-            loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
-
-            batch_size = labels.shape[0]
-
-            # Shape (1)
-            if self.loss_type == "mean":
-                loss = loss.mean()
-            else:
-                loss = molecularLoss(loss, batch_size, loss_type=self.loss_type)
+            
+            loss = molecularLoss(shift_logits, shift_labels, loss_type=self.loss_type)
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -585,9 +606,9 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Output file 
-    if os.path.exists(training_args.output_dir):
-        print(f"{training_args.output_dir} already exists")
-        sys.exit(1)
+    # if os.path.exists(training_args.output_dir):
+    #     print(f"{training_args.output_dir} already exists")
+    #     sys.exit(1)
 
     # Initialize aim_callback
     aim_callback = None

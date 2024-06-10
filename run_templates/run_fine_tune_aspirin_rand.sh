@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=RandAspirin
+#SBATCH --job-name=RandAspirin125m
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
 #SBATCH --mem=40gb
@@ -15,28 +15,30 @@ export MOL_REPR="sf"
 export VOCAB_SIZE=192 # 192/600
 export DATA_SPLIT="all_rand_aspirin_0.4" 
 export DATA_SUF="" # _rand_8_versions
+export LOSS_TYPE="mean"
 export LR=""
-export GRAD_ACC=1
-export BS_TRAIN=256
-export BS_VALID=128
+export GRAD_ACC=4
+export BS_TRAIN=64
+export BS_VALID=64
 export WARMUP=391
+export MODEL_SIZE="125m"
 
 
-for LR in "16.00E-05" "8.00E-05" "12.00E-05"
+for LR in "8.00E-05"
 do
 accelerate launch --config_file ../accelerate_fsdp_config_33.yaml \
-     ../src/train_with_trainer.py \
+     ../src/train_with_molecular_batch.py \
     --resume_from_checkpoint "" \
-    --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
+    --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
     --dataset_name ../src/data/data/data_bin_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF \
     --tokenizer_name ../src/data/tokenizers/tokenizer_$MOL_REPR/tokenizer.json \
-    --output_dir ../src/checkpoints/fine_tuned/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR \
-    --aim_exp_name "OPT_1.2B_ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR, valid_data=0.5K all versions, sum_of_probs." \
+    --output_dir ../src/checkpoints/fine_tuned/OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR \
+    --aim_exp_name "OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR, valid_data=0.5K all versions, sum_of_probs." \
     --seed 1 \
     --do_train \
     --do_eval \
     --evaluation_strategy steps \
-    --config_name facebook/opt-1.3B \
+    --config_name facebook/opt-125m \
     --max_position_embeddings 64 \
     --dropout 0.0 \
     --vocab_size $VOCAB_SIZE \
@@ -60,12 +62,14 @@ accelerate launch --config_file ../accelerate_fsdp_config_33.yaml \
     --local_rank 0 \
     --log_on_each_node \
     --logging_steps 1 \
-    --eval_steps 300 \
+    --eval_steps 600 \
     --max_steps -1 \
-    --save_steps  100 \
+    --save_steps  600 \
     --warmup_steps $WARMUP \
     --num_train_epochs 1 \
     --per_device_train_batch_size $BS_TRAIN \
     --per_device_eval_batch_size $BS_VALID \
-    --learning_rate $LR 
+    --learning_rate $LR \
+    --loss_type $LOSS_TYPE \
+    --shuffle_train True
 done    

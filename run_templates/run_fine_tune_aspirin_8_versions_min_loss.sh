@@ -4,35 +4,36 @@
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
 #SBATCH --mem=40gb
-#SBATCH --time=30:00:00
+#SBATCH --time=40:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
 
 
-export PRE_TRAIN="canon"
+export PRE_TRAIN="rand"
 export MOL_REPR="sf"
 export VOCAB_SIZE=192 # 192/600
 export DATA_SPLIT="all_rand_aspirin_0.4" 
 export DATA_SUF="_rand_8_versions" # _rand_8_versions
 export LR=""
 export LOSS_TYPE="min"
-export GRAD_ACC=1
-export BS_TRAIN=256
+export GRAD_ACC=4
+export BS_TRAIN=64
 export BS_VALID=64
 export WARMUP=391
+export MODEL_SIZE="1.2B"
 
 
-for LR in "8.00E-05"
+for LR in "1.00E-05" "2.00E-05" "4.00E-06"
 do
 accelerate launch --config_file ../accelerate_fsdp_config_2.yaml \
      ../src/train_with_molecular_batch.py \
     --resume_from_checkpoint "" \
-    --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
+    --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
     --dataset_name ../src/data/data/data_bin_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF \
     --tokenizer_name ../src/data/tokenizers/tokenizer_$MOL_REPR/tokenizer.json \
-    --output_dir ../src/checkpoints/fine_tuned/OPT_1.2B_ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR"_"$LOSS_TYPE"_"loss \
-    --aim_exp_name "OPT_1.2B_ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR, valid_data=0.5K all versions, sum_of_probs, $LOSS_TYPE loss." \
+    --output_dir ../src/checkpoints/fine_tuned/OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR"_"$LOSS_TYPE"_"loss \
+    --aim_exp_name "OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"finetune_$DATA_SPLIT"_"$MOL_REPR"_"1000K$DATA_SUF"_"$LR, valid_data=0.5K all versions, sum_of_probs, $LOSS_TYPE loss." \
     --seed 1 \
     --do_train \
     --do_eval \

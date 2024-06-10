@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --job-name=Aspirin8VersionMeanLoss
+#SBATCH --job-name=Aspirin8VersionRecallLoss
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
 #SBATCH --mem=40gb
-#SBATCH --time=40:00:00
+#SBATCH --time=50:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
@@ -16,7 +16,7 @@ export VOCAB_SIZE=192 # 192/600
 export DATA_SPLIT="all_rand_aspirin_0.4" 
 export DATA_SUF="_rand_8_versions" # _rand_8_versions
 export LR=""
-export LOSS_TYPE="mean"
+export LOSS_TYPE="recall"
 export GRAD_ACC=4
 export BS_TRAIN=64
 export BS_VALID=64
@@ -24,9 +24,9 @@ export WARMUP=391
 export MODEL_SIZE="1.2B"
 
 
-for LR in "12.00E-05" "1.00E-05"
+for LR in "4.00E-06" "1.00E-06" "8.00E-06"
 do
-accelerate launch --config_file ../accelerate_fsdp_config_5.yaml \
+accelerate launch --config_file ../accelerate_fsdp_config_3.yaml \
      ../src/train_with_molecular_batch.py \
     --resume_from_checkpoint "" \
     --finetune_from_checkpoint "../src/checkpoints/pre_trained/OPT_$MODEL_SIZE"_"ep_1_all_$PRE_TRAIN"_"$MOL_REPR"_"848M/checkpoint-25750/pytorch_model.bin" \
