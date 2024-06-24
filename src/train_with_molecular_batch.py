@@ -767,10 +767,12 @@ def main():
         @torch.no_grad()
         def compute_perplexity(eval_preds, base=2):
             logits, labels = eval_preds
+
             logits = torch.FloatTensor(logits)
             labels = torch.LongTensor(labels)
 
             labels = labels.to(logits.device)
+
             # Shift so that tokens < n predict n, shape(bs, seq_len, vocab_size)
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
@@ -780,7 +782,7 @@ def main():
             flat_labels = shift_labels.view(-1)
 
             # Shape(bs x seq_len, vocab_size)
-            mask_labels = (flat_labels != 1) & (flat_labels != -100)
+            mask_labels = (flat_labels != 1)
             # Shape(bs x seq_len)
             mask_logits = mask_labels.unsqueeze(1).repeat_interleave(flat_logits.shape[-1], dim=-1)
 
@@ -792,7 +794,7 @@ def main():
             flat_labels_reduced = flat_labels[mask_labels]
 
             # Compute loss, shape(bs x seq_len)
-            loss_fct = CrossEntropyLoss(reduction="mean")
+            loss_fct = CrossEntropyLoss(reduction="mean", ignore_index=-100)
 
             loss = loss_fct(flat_logits_reduced, flat_labels_reduced)
 
