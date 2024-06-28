@@ -22,10 +22,10 @@ def main():
     tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer)
     tokenizer.pad_token = "<pad>"
 
-    if len(tokenizer.get_vocab()) != 192:
+    if len(tokenizer.get_vocab()) != args.vocab_size:
         i = len(tokenizer.get_vocab())
 
-        while i < 192:
+        while i < args.vocab_size:
             symbol = "madeupword{:03d}".format(i)
         
             tokenizer.add_tokens(symbol)
@@ -66,7 +66,9 @@ def main():
 
         # Generate
         generate_ids = model.generate(prompt_data, max_length=64, do_sample=True, top_k=len(tokenizer.get_vocab()))
+        print("generate_ids", generate_ids)
         outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        print("outputs", outputs)
         
         # Write in a file
         write_func("\n".join(outputs) + "\n")
@@ -112,6 +114,12 @@ def parse_args():
         type=int,
         default=1,
         help="The number of generations.",
+    )
+    parser.add_argument(
+        "--vocab_size",
+        type=int,
+        default=0,
+        help="The size of the vocabulary.",
     )
     args = parser.parse_args()
 
