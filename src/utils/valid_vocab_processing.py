@@ -70,6 +70,3 @@ def vocab_tokens_to_jsonl(tokenizer_path: str, output_path: str) -> None:
         print(f"Vocabulary tokens successfully written to {output_path}")
     except Exception as e:
         print(f"Error writing tokens to JSONL file: {e}")
-
-tokenizer = '/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13_my/src/data/tokenizers/tokenizer_sf/tokenizer.json'
-vocab_tokens_to_jsonl(tokenizer_path=tokenizer, output_path='/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13_my/src/experiments/data/temp_smm.jsonl')
