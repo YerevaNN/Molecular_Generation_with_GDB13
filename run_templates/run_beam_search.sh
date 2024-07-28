@@ -27,7 +27,7 @@ export MODEL="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Ge
 export TOKENIZER="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/data/tokenizers/tokenizer_${SHORT_REPR}/tokenizer.json"
 export OUT_PATH="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/generations/${REPR}/${SUBSET}_Beam_${GEN_LEN_STR}_temp_${TEMPERATURE}_${PRETRAIN}_${FINETUNE}_iter_length_${ITER_LEN}.csv"
 
-python /nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/utils/beam_search.py \
+python /nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/beam_search.py \
      --tokenizer_path $TOKENIZER \
      --resume_from_checkpoint $MODEL \
      --output_beams $OUT_PATH \
