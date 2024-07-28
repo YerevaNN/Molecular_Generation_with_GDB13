@@ -1,40 +1,36 @@
 #!/bin/bash
 
-#SBATCH --job-name=CalcStats                     
+#SBATCH --job-name=PredMetrics                     
 #SBATCH --cpus-per-task=1        
 #SBATCH --mem=20gb                  
-#SBATCH --time=01:00:00                          
+#SBATCH --time=02:00:00                          
 #SBATCH --output=logging/%x_%j.out  
 #SBATCH --error=logging/%x_%j.err
 
+export STR_TYPE='smiles'
 export SUBSET='aspirin'
-export SUBSET_LENGTH=8284280
-# SUBSET_LENGTH = 8284280 #aspirin
-# SUBSET_LENGTH = 6645440 #sas
-# SUBSET_LENGTH = 5289763 #druglike
-# SUBSET_LENGTH = 5702826 #eqdist
+export SUBSET_LENGTH=8284280 
 
-export REPR='selfies'
-export TEMPERATURE=1
-
-export PRETRAIN='canon'
-export FINETUNE='canon'
-
-export VALID_PROBS_CSV="nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/ablations/perplexities/correct_validations/${REPR}/valid_${PRETRAIN}_${FINETUNE}/${SUBSET}/probs.csv"
-export VALID_LENGTH=10000
-
+export VALID_LEN=10000
 export GEN_LEN=1000000
 export GEN_LEN_STR='1M'
-export FROM_GEN='10M'
-export GEN_ACTUAL_XLSX="nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/actual_generation_statistics/${REPR}/${SUBSET}/PRETRAIN_${PRETRAIN}_FINETUNE_${FINETUNE}_FROM_GEN_${FROM_GEN}_GEN_LEN_${GEN_LEN}_TEMP_${TEMPERATURE}.xlsx"
 
-export OUT_PATH="nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/predicted_generation_statistics/${REPR}/{SUBSET}/PRETRAIN_${PRETRAIN}_FINETUNE_${FINETUNE}_GEN_LEN_${GEN_LEN_STR}_VALID_LEN_${VALID_LENGTH}_TEMP_${TEMPERATURE}.xlsx"
-    
-python /nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/utils/Metrics_modeling.py \
+export TOP_K=192
+export TOP_P=1.0
+export TEMPERATURE=1.0
+
+export GEN_TYPE="top_k_${TOP_K}_top_p_${TOP_P}_temperature_${TEMPERATURE}"
+export PRETRAIN='rand'
+export FINETUNE='rand'
+export PROBS="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/ablations/perplexities/correct_validations/${STR_TYPE}/valid_${PRETRAIN}_${FINETUNE}/${SUBSET}/top_k_${TOP_K}_top_p_${TOP_P}_temperature_${TEMPERATURE}.csv"
+export ACTUAL_STATS="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/actual_generation_statistics/${STR_TYPE}/${SUBSET}/${GEN_TYPE}_gen_len_${GEN_LEN_STR}_${PRETRAIN}_${FINETUNE}.xlsx"
+export OUT_PATH="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/predicted_generation_statistics/${STR_TYPE}/${SUBSET}/${GEN_TYPE}_gen_len_${GEN_LEN_STR}_${PRETRAIN}_${FINETUNE}_valid_len_${VALID_LEN}_temp.xlsx" 
+
+python /nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/utils/metrics_modeling.py \
     --subset $SUBSET \
     --subset_length $SUBSET_LENGTH \
-    --valid_probs_csv $VALID_PROBS_CSV \
-    --valid_length $VALID_LENGTH \
-    --gen_actual_xlsx $GEN_ACTUAL_XLSX \
+    --valid_probs_csv $PROBS \
+    --valid_length $VALID_LEN \
+    --gen_actual_xlsx $ACTUAL_STATS\
     --gen_length $GEN_LEN \
-    --out_path $OUT_PATH 
+    --out_path $OUT_PATH
