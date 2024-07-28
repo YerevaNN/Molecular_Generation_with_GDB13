@@ -25,7 +25,7 @@ export TOP_K=192
 export TOP_P=1.0
 export TEMPERATURE=1.0
 
-export DATA="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/data/data/data_bin_all_canon_aspirin_0.4_sf_1000K/valid/00/valid_all_rand_aspirin_0.4_sf_0.5K_rand_all_versions.jsonl"
+export DATA="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13_my/src/data/data/randomized_valids/${STR_TYPE}/${SUBSET}/rand_valid_10K_sf.jsonl"
 export TOKENIZER="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/data/tokenizers/tokenizer_${SHORT_STR_TYPE}/tokenizer.json"
 export CHECKPOINT="OPT_1.2B_ep_1_all_${PRETRAIN}_finetune_all_${FINETUNE}_${SUBSET_EXT}_${SHORT_STR_TYPE}_1000K_${LR}"
 export MODEL="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/checkpoints/fine_tuned/${CHECKPOINT}/checkpoint-${ITERATION}"

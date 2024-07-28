@@ -24,7 +24,7 @@ export PRETRAIN='rand'
 export FINETUNE='rand'
 export PROBS="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/ablations/perplexities/correct_validations/${STR_TYPE}/valid_${PRETRAIN}_${FINETUNE}/${SUBSET}/top_k_${TOP_K}_top_p_${TOP_P}_temperature_${TEMPERATURE}.csv"
 export ACTUAL_STATS="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/actual_generation_statistics/${STR_TYPE}/${SUBSET}/${GEN_TYPE}_gen_len_${GEN_LEN_STR}_${PRETRAIN}_${FINETUNE}.xlsx"
-export OUT_PATH="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/predicted_generation_statistics/${STR_TYPE}/${SUBSET}/${GEN_TYPE}_gen_len_${GEN_LEN_STR}_${PRETRAIN}_${FINETUNE}_valid_len_${VALID_LEN}_temp.xlsx" 
+export OUT_PATH="/nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/statistics/predicted_generation_statistics/${STR_TYPE}/${SUBSET}/${GEN_TYPE}_gen_len_${GEN_LEN_STR}_${PRETRAIN}_${FINETUNE}_valid_len_${VALID_LEN}.xlsx" 
 
 python /nfs/c9/mnt/2tb/chem/hasmik/GDB_Generation_hf_project/Molecular_Generation_with_GDB13/src/utils/metrics_modeling.py \
     --subset $SUBSET \
