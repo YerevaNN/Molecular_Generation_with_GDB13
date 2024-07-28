@@ -212,7 +212,7 @@ def write_probs_csv(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
+    parser = argparse.ArgumentParser(description="Validate a model wrt decoding strategy.")
     parser.add_argument(
         "--data_path",
         type=str,
