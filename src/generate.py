@@ -14,10 +14,11 @@ from transformers import OPTForCausalLM, PreTrainedTokenizerFast
 
 def main():
     args = parse_args()
-
     top_k = args.top_k
     top_p = args.top_p
     temperature = args.temperature
+
+    torch.manual_seed(0)
 
     accelerator = Accelerator()
 
@@ -26,10 +27,10 @@ def main():
     tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer)
     tokenizer.pad_token = "<pad>"
 
-    if len(tokenizer.get_vocab()) != 192:
+    if len(tokenizer.get_vocab()) != args.vocab_size:
         i = len(tokenizer.get_vocab())
 
-        while i < 192:
+        while i < args.vocab_size:
             symbol = "madeupword{:03d}".format(i)
         
             tokenizer.add_tokens(symbol)
@@ -116,6 +117,12 @@ def parse_args():
         type=int,
         default=1,
         help="The number of generations.",
+    )
+    parser.add_argument(
+        "--vocab_size",
+        type=int,
+        default=0,
+        help="The size of the vocabulary.",
     )
     parser.add_argument(
         "--top_k",
