@@ -14,6 +14,11 @@ from transformers import OPTForCausalLM, PreTrainedTokenizerFast
 
 def main():
     args = parse_args()
+    top_k = args.top_k
+    top_p = args.top_p
+    temperature = args.temperature
+
+    torch.manual_seed(0)
 
     accelerator = Accelerator()
 
@@ -65,8 +70,7 @@ def main():
     for i in tqdm(range(math.ceil(args.gen_len / args.batch_size))):
 
         # Generate
-        generate_ids = model.generate(prompt_data, max_length=64, do_sample=True, top_k=len(tokenizer.get_vocab()))
-        print("generate_ids", generate_ids)
+        generate_ids = model.generate(prompt_data, max_length=64, do_sample=True, top_k=top_k, top_p=top_p, temperature=temperature)
         outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
         print("outputs", outputs)
         
@@ -121,6 +125,25 @@ def parse_args():
         default=0,
         help="The size of the vocabulary.",
     )
+    parser.add_argument(
+        "--top_k",
+        type=int,
+        default=50,
+        help="The hyperparameter of top-k sampling.",
+    )
+    parser.add_argument(
+        "--top_p",
+        type=float,
+        default=1.0,
+        help="The hyperparameter of top-p sampling.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="The temperature for scaling.",
+    )
+
     args = parser.parse_args()
 
     return args

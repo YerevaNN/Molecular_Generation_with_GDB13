@@ -1,11 +1,11 @@
-from tqdm import tqdm
 import json
-import selfies as sf
-from rdkit import Chem
-import multiprocessing as mp
-import pandas as pd
 import time
 import argparse
+import pandas as pd
+import selfies as sf
+from tqdm import tqdm
+from rdkit import Chem
+import multiprocessing as mp
     
 def jsonl_to_list(jsonl_path: str) -> list[str]:
     """
@@ -21,6 +21,7 @@ def jsonl_to_list(jsonl_path: str) -> list[str]:
         mol_list = [json.loads(line_str)["text"] for line_str in tqdm(file)]
         return mol_list
 
+
 def csv_to_list(csv_path: str) -> list[str]:
     """
     Converts the file from input csv file to a list.
@@ -34,6 +35,7 @@ def csv_to_list(csv_path: str) -> list[str]:
     with open(csv_path, 'r') as file:
         mol_list = [mol_str.strip() for mol_str in tqdm(file) if mol_str.strip()]
     return mol_list
+
 
 def convert_to_canonical_smiles(mol_str: str) -> str:
     """
@@ -50,15 +52,17 @@ def convert_to_canonical_smiles(mol_str: str) -> str:
     """
     try:
         mol = Chem.MolFromSmiles(mol_str)
-        if mol in None:
+        if mol is None:
             raise ValueError
         else:
             canon_smiles = Chem.MolToSmiles(mol)
     except ValueError:
         print(f'Invalid SMILES {mol_str}')
+        return None
     else:
         return canon_smiles
     
+
 def convert_to_canonical_selfies(mol_str: str) -> str:
     """
     Converts a molucular 1D representations (selfies) into canonical selfies representation.
@@ -94,14 +98,15 @@ def convert_to_canonical_selfies(mol_str: str) -> str:
     else:
         return canon_selfies
     
-def calculate_statistics(num_processes: int, chunk_size: int, gen_length: int, repr_type: str, subset_list: list, generation_list: list) -> tuple[int,int]:
+
+def calculate_statistics(num_processes: int, chunk_size: int, gen_length: int, str_type: str, subset_list: list, generation_list: list) -> tuple[int,int]:
     """
     Calculates the number of duplicated and unique generated molecules from subset.
 
     Args:
         num_processes (int): The number of worker processes for parallelization.
         chunk_size (int): The number of molecules to be converted to canonical form parallelly.
-        repr_type (str): The type of molecular representation (selfies/smiles).
+        str_type (str): The type of molecular representation (selfies/smiles).
         subset_list (list): A list containing the molecules of the subset.
         generation_list (list): A list containing the generated molecules.
 
@@ -111,9 +116,9 @@ def calculate_statistics(num_processes: int, chunk_size: int, gen_length: int, r
     ctx = mp.get_context('spawn')
 
     # Convert generations to canonical forms
-    if repr_type == 'selfies':
+    if str_type == 'selfies':
         convert_to_canonical_representation = convert_to_canonical_selfies
-    elif repr_type == 'smiles':
+    elif str_type == 'smiles':
         convert_to_canonical_representation = convert_to_canonical_smiles
     else:
         print('Representation must be either smiles or selfies')
@@ -126,6 +131,7 @@ def calculate_statistics(num_processes: int, chunk_size: int, gen_length: int, r
             canon_gen_list += p.map(convert_to_canonical_representation, generation_list[0+i:chunk_size+i])
     print('Done. Time:', time.time()-time1)
     print('canon_gen_length', len(canon_gen_list))
+    print('generation length', len(generation_list))
 
     # Get the number of unique molecules generated from subset
     print('Start to calculate the number of unique true positives.')
@@ -144,15 +150,16 @@ def calculate_statistics(num_processes: int, chunk_size: int, gen_length: int, r
         else:
             gen_dict[mol] = 1
 
-    num_duplicate_tp = sum(gen_dict[mol] for mol in intersect_subset_gen)
+    num_tp = sum(gen_dict[mol] for mol in intersect_subset_gen)
     print('Done. Time:', time.time() - time1)
 
-    return num_duplicate_tp, num_unique_tp
+    return num_tp, num_unique_tp
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Calculate statistics on generation")
     parser.add_argument(
-        "--repr_type",
+        "--str_type",
         type=str,
         default=None,
         help="The type of molecular representation (selfies/smiles).",
@@ -197,12 +204,13 @@ def parse_args():
 
     return args
    
+   
 if __name__=='__main__':
 
     args = parse_args()
 
     # Representation of molecules 'SELFIES' or 'SMILES'
-    REPR = args.repr_type 
+    STR_TYPE = args.str_type 
 
     # Paths
     SUBSET_PATH = args.subset_path
@@ -227,8 +235,8 @@ if __name__=='__main__':
 
     time1 = time.time()
     print('Start to calculate statistics')
-    num_duplicate_tp, num_unique_tp = calculate_statistics(num_processes=NUM_PROCESSES, chunk_size=CHUNK_SIZE, gen_length=GEN_LENGTH, repr_type=REPR, subset_list=SUBSET_LIST, generation_list=GENERATION_LIST)
-    stat_df = pd.DataFrame({'Actual Duplicated TP': [num_duplicate_tp], "Actual Unique TP": [num_unique_tp]})
+    num_tp, num_unique_tp = calculate_statistics(num_processes=NUM_PROCESSES, chunk_size=CHUNK_SIZE, gen_length=GEN_LENGTH, str_type=STR_TYPE, subset_list=SUBSET_LIST, generation_list=GENERATION_LIST)
+    stat_df = pd.DataFrame({'TP': [num_tp], "Unique TP": [num_unique_tp]})
     stat_df.to_excel(OUTPUT_PATH, index=False)
     print(stat_df)
     print('Calculating statistics done. Time:', time.time() - time1)

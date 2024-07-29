@@ -24,7 +24,7 @@ def write_jsonl(line_str, output_file):
     output_file.write("\n")
 
 
-def randomize_smiles(smiles_str, random_type="restricted"):
+def randomize_smiles(smiles_str, random_type="unrestricted"):
     mol = None
 
     # try:    
