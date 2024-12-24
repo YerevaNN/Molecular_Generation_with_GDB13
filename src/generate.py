@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader
 from accelerate import Accelerator
 from tokenizers import Tokenizer
-from transformers import OPTForCausalLM, PreTrainedTokenizerFast
+from transformers import OPTForCausalLM, PreTrainedTokenizerFast, LlamaForCausalLM
 
 
 def main():
@@ -18,8 +18,12 @@ def main():
     top_p = args.top_p
     temperature = args.temperature
 
-    torch.manual_seed(0)
+    # Output file 
+    if os.path.exists(args.output_dir):
+        print(f"{args.output_dir} already exists")
+        sys.exit(1)
 
+    torch.manual_seed(0)
     accelerator = Accelerator()
 
     # Convert to Transformer's tokenizer
@@ -39,10 +43,6 @@ def main():
     # Prompt, includes BOS token
     start_prompt = [0]
 
-    if args.prompt_token != "_":
-        id = tokenizer.convert_tokens_to_ids(args.prompt_token)
-        start_prompt.append(id)
-
     prompt = torch.tensor(start_prompt, dtype=int)
     print("The prompt is", prompt.data)
     prompt = prompt.repeat(args.batch_size, 1)
@@ -50,16 +50,16 @@ def main():
     dataset = TensorDataset(prompt)
     data_loader = DataLoader(dataset, args.batch_size, shuffle=False)
 
-    # Model 
-    model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=args.resume_from_checkpoint)
+    # Model
+    if "OPT" in args.resume_from_checkpoint: 
+        model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=args.resume_from_checkpoint)
+    elif "LLama" in args.resume_from_checkpoint:
+        model = LlamaForCausalLM.from_pretrained(pretrained_model_name_or_path=args.resume_from_checkpoint)
+    else:
+        raise NotImplementedError        
     print(model)
 
     model, data_loader = accelerator.prepare(model, data_loader)
-
-    # Output file 
-    if os.path.exists(args.output_dir):
-        print(f"{args.output_dir} already exists")
-        sys.exit(1)
 
     csv_file = open(args.output_dir, "wt+")
     write_func = functools.partial(csv_file.write)
@@ -68,11 +68,9 @@ def main():
     prompt_data = next(data_iter)[0]
 
     for i in tqdm(range(math.ceil(args.gen_len / args.batch_size))):
-
         # Generate
         generate_ids = model.generate(prompt_data, max_length=64, do_sample=True, top_k=top_k, top_p=top_p, temperature=temperature)
         outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
-        print("outputs", outputs)
         
         # Write in a file
         write_func("\n".join(outputs) + "\n")
@@ -100,12 +98,6 @@ def parse_args():
         type=str,
         default=None,
         help="Output file directory for the generations.",
-    )
-    parser.add_argument(
-        "--prompt_token",
-        type=str,
-        default="",
-        help="The prompt after <s> token.",
     )
     parser.add_argument(
         "--batch_size",

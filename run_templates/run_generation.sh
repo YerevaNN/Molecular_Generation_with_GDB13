@@ -1,34 +1,38 @@
 #!/bin/bash
 
-#SBATCH --job-name=MolgenGen
-#SBATCH --cpus-per-task=20
+#SBATCH --job-name=GenAspTemp
+#SBATCH --cpus-per-task=10
 #SBATCH --gres=gpu:1
 #SBATCH --mem=20gb
-#SBATCH --time=1:00:00
+#SBATCH --time=100:00:00
 #SBATCH --nodes=1
 #SBATCH --output=logging/%x_%j.out
 #SBATCH --error=logging/%x_%j.err
 
 
+export N=4
+export GEN_LEN=$((N * 1000000))
+export GEN_LEN_STR=$N"M" 
+
 export ITERATION=3900
-export GEN_LEN=1000000
-export PROMPT="_" # [Canon] / [Rand]
-export MOL_REPR="sm"
-export VOCAB_SIZE=584
-export TOP_K=584
+export MOL_REPR="sf"
+export VOCAB_SIZE=192
+export TOP_K=192
 export TOP_P=1.0
 export TEMPERATURE=1.0
+export MODEL="OPT_1.2B_ep_1_all_canon_finetune_all_canon_aspirin_0.4_sf_1000K_8.00E-05"
 
-
-accelerate launch --config_file ../accelerate_gen_config.yaml \
-     ../src/generate.py \
-    --tokenizer_name ../src/data/tokenizers/tokenizer_sf/tokenizer.json \
-    --resume_from_checkpoint ../src/checkpoints/$MODEL/checkpoint-$ITERATION \
-    --output_dir ../src/ablations/generations/$MODEL"_"iter_$ITERATION"_gen_"$GEN_LEN"_"$PROMPT.csv \
-    --batch_size 128 \
-    --prompt_token $PROMPT \
-    --gen_len $GEN_LEN \
-    --vocab_size $VOCAB_SIZE \
-    --top_k $TOP_K \
-    --top_p $TOP_P \
-    --temperature $TEMPERATURE \
+for temp in 0.6 0.8 1.0 1.2 1.5
+do
+     accelerate launch --config_file ../accelerate_fsdp_config_gen_opt.yaml \
+          ../src/generate.py \
+     --tokenizer_name ../src/data/tokenizers/tokenizer_${MOL_REPR}/tokenizer.json \
+     --resume_from_checkpoint ../src/checkpoints/fine_tuned/sf/$MODEL/checkpoint-$ITERATION \
+     --output_dir "../src/ablations/generations/generations/$MOL_REPR/temperatures/$MODEL"_"iter_$ITERATION"_gen_"$GEN_LEN_STR"_temp_"$temp.csv" \
+     --batch_size 4096 \
+     --gen_len $GEN_LEN \
+     --vocab_size $VOCAB_SIZE \
+     --top_k $TOP_K \
+     --top_p $TOP_P \
+     --temperature $TEMPERATURE
+done     
