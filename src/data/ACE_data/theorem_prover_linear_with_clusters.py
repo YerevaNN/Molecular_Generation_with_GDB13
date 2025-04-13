@@ -1,5 +1,4 @@
 import os
-import re
 import glob
 import time
 import shutil
@@ -14,10 +13,6 @@ from tqdm import tqdm
 from pathlib import Path
 from pprint import pformat
 
-import numpy as np
-
-import cProfile
-import pstats
 import psutil
 
 
@@ -68,7 +63,7 @@ def load_tptp(input_path):
                 # Precompute the conj line for each formula
                 conjs.append(line.replace(", axiom,", ", conjecture,"))
 
-        logging.info(f"Count of axioms is {len(axioms)}. Time {time.time() - time_start:.3f} sec.")   
+        # logging.info(f"Count of axioms is {len(axioms)}. Time {time.time() - time_start:.3f} sec.")   
 
     return axioms, conjs 
 
@@ -91,7 +86,7 @@ def load_tptp_from_clusters(input_paths):
                 print("something went wrong with line")   
                 print(line)  
 
-    logging.info(f"Count of axioms is {len(axioms)}. Time {time.time() - time_start:.3f} sec.")   
+    # logging.info(f"Count of axioms is {len(axioms)}. Time {time.time() - time_start:.3f} sec.")   
 
     return axioms, conjs     
 
@@ -111,7 +106,7 @@ def load_txt(input_path):
             if line:
                 txt_lines.append(line)
 
-        logging.info(f"Count of lines is {len(txt_lines)}. Time {time.time() - time_start:.3f} sec.")   
+        # logging.info(f"Count of lines is {len(txt_lines)}. Time {time.time() - time_start:.3f} sec.")   
 
     return txt_lines 
 
@@ -127,12 +122,12 @@ def load_txt_from_clusters(input_paths):
             if line:
                 txt_lines.append(line)
 
-    logging.info(f"Count of lines is {len(txt_lines)}. Time {time.time() - time_start:.3f} sec.")   
+    # logging.info(f"Count of lines is {len(txt_lines)}. Time {time.time() - time_start:.3f} sec.")   
 
     return txt_lines 
         
     
-def run_vampire(axiom_line, conj_line, vampire_path, timeout=10, attempt=0):
+def run_vampire(axiom_line, conj_line, vampire_path, show_progress, indx, timeout=10, attempt=0):
     """
     Runs Vampire with the given axiom and conjecture lines by piping them directly to its stdin.
 
@@ -172,24 +167,26 @@ def run_vampire(axiom_line, conj_line, vampire_path, timeout=10, attempt=0):
     elif "SZS status CounterSatisfiable" in output:
         return 0
     else:
-        logging.info(f"Unexpected Vampire output: `{output}` at attempt {attempt}")
+        if show_progress:
+            logging.info(f"Unexpected Vampire output: `{output}` at attempt {attempt} at line {indx}.")
+
         if attempt == 3:
             return -1
-        return run_vampire(axiom_line, conj_line, vampire_path, timeout=50, attempt=attempt + 1)
+        return run_vampire(axiom_line, conj_line, vampire_path, show_progress, indx, timeout=timeout, attempt=attempt + 1)
 
 
-def worker_fn(task, prover_path, timeout):
+def worker_fn(task, prover_path, timeout, show_progress, indx):
     """Top-level function for parallel calls."""
     indx, ax_line, conj_line = task
 
     if "vampire" in prover_path:
-        res = run_vampire(ax_line, conj_line, prover_path, timeout=timeout)  
+        res = run_vampire(ax_line, conj_line, prover_path, show_progress, indx, timeout)
     else:
         raise NameError("There is no such a prover")    
     return (indx,  res)
 
 
-def write_line_to_file(
+async def write_line_to_file(
     path: str,
     line: str,
     mode: str = "w",
@@ -198,28 +195,25 @@ def write_line_to_file(
     max_retries: int = 3
 ) -> None:
     try:
-        with open(f"{path}.{extension}", mode) as f:
-            f.write(line + "\n")
-
-        # if mode == "w":
-        #     logging.info(f"Data saved to {path}")
+        async with aiofiles.open(f"{path}.{extension}", mode) as f:
+            await f.write(line + "\n")
 
     except Exception as e:
         if retries >= max_retries:
             raise OSError(f"Failed after {max_retries} retries: {e}")
 
-        return write_line_to_file(path, line, mode, extension, retries + 1, max_retries)
+        await write_line_to_file(path, line, mode, extension, retries + 1, max_retries)
 
 
-def write_to_files(cluster_path, txt_line, tptp_line, mode="w"):
+async def write_to_files(cluster_path, txt_line, tptp_line, mode="w"):
     # write to txt file
-    write_line_to_file(cluster_path, txt_line, mode=mode, extension="txt"), 
+    await write_line_to_file(cluster_path, txt_line, mode=mode, extension="txt"), 
 
     # write to tptp file
     if "conjecture" in tptp_line:
         tptp_line = tptp_line.replace(", conjecture,", ", axiom,")
         
-    write_line_to_file(cluster_path, tptp_line, mode=mode, extension="tptp")  
+    await write_line_to_file(cluster_path, tptp_line, mode=mode, extension="tptp")  
 
 
 def merge_2_files(cluster_path, merge_file_path, extension="txt", retries=0, max_retries=3):  
@@ -243,12 +237,6 @@ async def merge_files(cluster_path, merge_file_path):
     # merge tptpt files
     merge_2_files(cluster_path, merge_file_path, extension="tptp")  
 
-    # delete files
-    # await asyncio.gather(
-    #     async_remove_file(f"{merge_file_path}.txt"),
-    #     async_remove_file(f"{merge_file_path}.tptp"),
-    # )
-
 
 async def copy_files(new_path: str, old_path: str):
     """Asynchronously copy files and then remove the originals."""
@@ -258,18 +246,11 @@ async def copy_files(new_path: str, old_path: str):
         async_copy_file(f"{old_path}.tptp", f"{new_path}.tptp"),
     )
 
-    # Remove old files
-    # await asyncio.gather(
-    #     async_remove_file(f"{old_path}.txt"),
-    #     async_remove_file(f"{old_path}.tptp"),
-    # )
-
 
 async def async_remove_file(path: str):
     """Asynchronously remove a file."""
     try:
         await asyncio.to_thread(os.remove, path)
-        # print(f"Deleted: {path}")
     except Exception as e:
         print(f"Error deleting {path}: {e}")
 
@@ -279,13 +260,13 @@ async def async_copy_file(src: str, dst: str):
     await asyncio.to_thread(shutil.copy, src, dst)
 
 
-def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout):
+def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout, show_progress, indx):
     equivalence_result = [-1, -1]
 
     current_pair = [[0, axiom_line, conj_line], [1, conj_line, axiom_line]]   
 
     futures = [
-        executor.submit(worker_fn, t, prover_path, timeout)
+        executor.submit(worker_fn, t, prover_path, timeout, show_progress, indx)
         for t in current_pair
     ]
 
@@ -293,13 +274,17 @@ def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout):
         indx, res_val = fut.result()
         equivalence_result[indx] = res_val
 
-        if res_val == -1:
+        if res_val == -1 and show_progress:
             logging.error(f"Unexpected value for axiom ({axiom_line})")
 
-    return equivalence_result   
-
+    return equivalence_result  
+ 
 
 def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout):
+    asyncio.run(process_chunk_async(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout))
+
+
+async def process_chunk_async(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout):
     t = time.time()
     line_count = len(axioms_N)
     
@@ -311,20 +296,16 @@ def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, inp
     cluster_number = 0
     cluster_path = os.path.join(process_output_path, f"cluster_{cluster_number}")
     clusters = {cluster_path: axioms_N[0]}
-    write_to_files(cluster_path, txt_N[0], axioms_N[0], mode="w") 
+    await write_to_files(cluster_path, txt_N[0], axioms_N[0], mode="w") 
 
     undefined_path = os.path.join(output_path, "undefined")
 
     if not os.path.exists(os.path.join(output_path, "undefined.txt")):
         # Create a file for undefined (-1) equivalence results also
-        write_to_files(undefined_path, "", "", mode="w") 
+        await write_to_files(undefined_path, "", "", mode="w") 
 
     # For showing only one process output
     show_progress = start == 0
-
-    # if show_progress:  
-    #     profiler = cProfile.Profile()
-        # profiler.enable()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as thread_executor:
         for indx, conj_line in tqdm(enumerate(conjs_N), disable=not show_progress):
@@ -339,13 +320,13 @@ def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, inp
             vampire_calls = 0
 
             for cluster_path, cluster_tptp in clusters.items():    
-                equivalence_result = check_equivalence(cluster_tptp, conj_line, thread_executor, prover_path, timeout)
+                equivalence_result = check_equivalence(cluster_tptp, conj_line, thread_executor, prover_path, timeout, show_progress, indx)
                 vampire_calls += 1
                 
                 if equivalence_result[0] == equivalence_result[1] == 1:
                     belongs_to_a_cluster = True
                     # write to .txt and .tptp files
-                    write_to_files(cluster_path, txt_N[indx], conj_line, mode="a")
+                    await write_to_files(cluster_path, txt_N[indx], conj_line, mode="a")
                     break
 
                 if equivalence_result[0] == -1 or equivalence_result[1] == -1:
@@ -353,79 +334,72 @@ def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, inp
 
             if not belongs_to_a_cluster and contains_undefined_results:
                 # Write to a undefined results file
-                write_to_files(undefined_path, txt_N[indx], conj_line, mode="a")
+                await write_to_files(undefined_path, txt_N[indx], conj_line, mode="a")
             elif not belongs_to_a_cluster:
                 # Create new cluster
                 cluster_number += 1
                 new_cluster_path = os.path.join(process_output_path, f"cluster_{cluster_number}")
                 axiom_line = conj_line.replace(", conjecture,", ", axiom,")
                 clusters[new_cluster_path] = axiom_line
-                write_to_files(cluster_path, txt_N[indx], axiom_line, mode="w")
+                await write_to_files(cluster_path, txt_N[indx], axiom_line, mode="w")
             
             if show_progress:
                 print(f"Running line {indx} / {line_count}, Duration: {(time.time() - start_time) / 60:.1f} min with {cluster_number} clusters, Vampire calls: {vampire_calls}, Processed: {(time.time() - t) / 3600:.1f} hours.")
 
-    # if show_progress:  
-    #     profiler.disable()
-    #     stats = pstats.Stats(profiler).strip_dirs().sort_stats("cumulative")
-    #     stats.print_stats(20)
+def process_cluster_chunk(process_number, process_cluster_pair_0, process_cluster_pair_1, prover_path, num_threads, output_path, timeout):
+    asyncio.run(process_cluster_chunk_async(process_number, process_cluster_pair_0, process_cluster_pair_1, prover_path, num_threads, output_path, timeout))
 
 
-def process_cluster_chunk(start, axioms_N, conjs_N, txt_N, clusters_paths_N, prover_path, num_threads, input_path, output_path, timeout):
+async def process_cluster_chunk_async(process_number, process_cluster_pair_0, process_cluster_pair_1, prover_path, num_threads, output_path, timeout):
     t = time.time()
-    line_count = len(axioms_N)
+    axioms_0, conjs_0, paths_0 = process_cluster_pair_0
+    axioms_1, conjs_1, paths_1 = process_cluster_pair_1
+
+    line_count_start = len(axioms_0)
+    line_count_end = len(axioms_1)
 
     # Each chunk creates a process_cluster for its own
-    process_output_path = os.path.join(output_path, f"process_cluster_{start}")
+    process_output_path = os.path.join(output_path, f"process_cluster_{process_number}")
     os.makedirs(process_output_path, exist_ok=True)
 
     # Create the first cluster file inside the process_cluster
     cluster_number = 0
-    cluster_path = os.path.join(process_output_path, f"cluster_{cluster_number}")
+    clusters = {}
 
-    clusters = {cluster_path: axioms_N[0]}
-    # asyncio.run(copy_and_remove_files(old_path=clusters_paths_N[0], new_path=cluster_path))
-    asyncio.run(copy_files(old_path=clusters_paths_N[0], new_path=cluster_path))
+    for path, axiom in tqdm(zip(paths_0, axioms_0)):
+        cluster_path = os.path.join(process_output_path, path.split("/")[-1])
+        await copy_files(old_path=path, new_path=cluster_path)
+        cluster_number += 1
 
+        clusters[cluster_path] = axiom    
+    
     # Undefined files
     parent_path = os.path.dirname(output_path)
     undefined_path = os.path.join(parent_path, "undefined")
 
     # For showing only one process output
-    show_progress = start == 0
+    show_progress = process_number == 0
 
-    # if show_progress:  
-    #     profiler = cProfile.Profile()
-        # profiler.enable()
+    if show_progress:
+        print(f"Start with {line_count_start} clusters.")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as thread_executor:
-        for indx, conj_line in tqdm(enumerate(conjs_N), disable=not show_progress):
+        for indx, conj_line in tqdm(enumerate(conjs_1), disable=not show_progress):
             start_time = time.time()
-            
-            if indx == 0:
-                continue
             
             belongs_to_a_cluster = False
             contains_undefined_results = False
 
             vampire_calls = 0
 
-            for cluster_path, cluster_tptp in clusters.items():    
-                # skip if they are within the same process_cluster
-                cluster_path_match = re.search(r"process_cluster_\d+", cluster_path)
-                merge_file_path_match = re.search(r"process_cluster_\d+", clusters_paths_N[indx])
-
-                if cluster_path_match.group() == merge_file_path_match.group():
-                    # print("skip comparison", cluster_path_match.group(), merge_file_path_match.group())
-                    continue
-
-                equivalence_result = check_equivalence(cluster_tptp, conj_line, thread_executor, prover_path, timeout)
+            for cluster_path, cluster_tptp in clusters.items():
+                equivalence_result = check_equivalence(cluster_tptp, conj_line, thread_executor, prover_path, timeout, show_progress, indx)
                 vampire_calls += 1
                 
                 if equivalence_result[0] == equivalence_result[1] == 1:
                     belongs_to_a_cluster = True
                     # merge .txt and .tptp clusters
-                    asyncio.run(merge_files(cluster_path, clusters_paths_N[indx]))
+                    await merge_files(cluster_path, paths_1[indx])
                     break
 
                 if equivalence_result[0] == -1 or equivalence_result[1] == -1:
@@ -434,25 +408,17 @@ def process_cluster_chunk(start, axioms_N, conjs_N, txt_N, clusters_paths_N, pro
             if not belongs_to_a_cluster and contains_undefined_results:
                 # Write path to a undefined results file
                 print("write to undefined")
-                write_to_files(undefined_path, clusters_paths_N[indx], clusters_paths_N[indx], mode="a")
+                await write_to_files(undefined_path, paths_1[indx], paths_1[indx], mode="a")
 
             elif not belongs_to_a_cluster:
                 # other cluster
                 # print("Left as another cluster")
                 cluster_number += 1
                 new_cluster_path = os.path.join(process_output_path, f"cluster_{cluster_number}")
-                axiom_line = conj_line.replace(", conjecture,", ", axiom,")
-
-                clusters[new_cluster_path] = axiom_line
-                asyncio.run(copy_files(old_path=clusters_paths_N[indx], new_path=new_cluster_path))
+                await copy_files(old_path=paths_1[indx], new_path=new_cluster_path)
             
             if show_progress:
-                print(f"Running line {indx} / {line_count}, Duration: {(time.time() - start_time) / 60:.1f} min with {cluster_number} clusters, Vampire calls: {vampire_calls}, Processed: {(time.time() - t) / 3600:.1f} hours.")
-
-    # if show_progress:  
-    #     profiler.disable()
-    #     stats = pstats.Stats(profiler).strip_dirs().sort_stats("cumulative")
-    #     stats.print_stats(20)
+                print(f"Running line {indx} / {line_count_end}, Duration: {(time.time() - start_time) / 60:.1f} min with Vampire calls: {vampire_calls}, {cluster_number} clusters, Processed: {(time.time() - t) / 3600:.1f} hours.")
      
 
 def main():
@@ -471,8 +437,8 @@ def main():
                         help="Number of parallel processes for chunking (default=1).")
     parser.add_argument("--num_threads", type=int, default=1,
                         help="Number of parallel threads(default=1).")
-    parser.add_argument("--timeout", type=int, default=10,
-                        help="Timeout in seconds for each Vampire call (default=50).")
+    parser.add_argument("--timeout", type=int, default=30,
+                        help="Timeout in seconds for each Vampire call (default=10).")
     # Parsing args
     args = parser.parse_args()
 
@@ -491,100 +457,94 @@ def main():
 
     # Track time for one file
     start_time = time.time()
-    clusters_paths = []
 
     if os.path.isdir(input_path):
         print("Reading lines from clusters ...")
-        # There are already clusters
-        clusters_tptp_paths = sorted(glob.glob(f"{input_path}/process_cluster_*/*.tptp"))
-        clusters_txt_paths = sorted(glob.glob(f"{input_path}/process_cluster_*/*.txt"))
-        clusters_paths = [p.replace(".tptp", "") for p in clusters_tptp_paths]
 
-        # Generating permutation order
-        perm = np.random.permutation(len(clusters_paths))
+        process_clusters_paths = sorted(glob.glob(f"{input_path}/process_cluster_*"))
+        process_clusters = []
 
-        # Shuffle order
-        clusters_tptp_paths = np.array(clusters_tptp_paths)[perm].tolist()
-        clusters_txt_paths = np.array(clusters_txt_paths)[perm].tolist()
-        clusters_paths = np.array(clusters_paths)[perm].tolist()
+        for path in tqdm(process_clusters_paths):
+            clusters_tptp = sorted(glob.glob(f"{path}/*.tptp"))
+            clusters_file_paths = [p.replace(".tptp", "") for p in clusters_tptp]
 
-        # Load data
-        axioms, conjs = load_tptp_from_clusters(clusters_tptp_paths)
-        txt_lines = load_txt_from_clusters(clusters_txt_paths)
-        axioms_len = len(axioms)
-        print(f"There are {len(txt_lines)} clusters.")
+            axioms, conjs = load_tptp_from_clusters(clusters_tptp)
+            process_clusters.append((axioms, conjs, clusters_file_paths))
+
+        process_clusters_len = len(process_clusters)
     else:
         print("Reading lines from files ...")
+
         # Load tptp and txt files
         axioms, conjs = load_tptp(input_path)
         txt_lines = load_txt(input_path)
         axioms_len = len(axioms)
         print(f"There are {len(txt_lines)} lines.")
 
-    # Start the CPU usage monitor thread
-    # cpu_monitor = CPUUsageMonitor(interval=1)
-    # cpu_monitor.start()
-
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as proecess_executor:
         futures = []
 
-        for start in range(0, axioms_len, chunk_size):
-        # for start in range(0, 90, chunk_size):
-            # in case axioms_len is not divisable to chunk_size
-            end = min(start + chunk_size, axioms_len)
+        if os.path.isdir(input_path):
+            assert chunk_size == 2, "Chunk size should be equal to 2" 
+            process_number = 0
 
-            # create chunks
+            for start in range(0, process_clusters_len, chunk_size):
+
+                # In case process_clusters_len is not divisable to chunk_size
+                end = min(start + chunk_size, process_clusters_len)
+
+                # Create chunks
+                if end == process_clusters_len:
+                    # Just copy the last cluster to a new place
+                    process_output_path = os.path.join(output_path, f"process_cluster_{process_number}")
+                    process_cluster_last_path = process_clusters[start: end][0][2][0]
+                    process_cluster_last_path = os.path.dirname(process_cluster_last_path)
+
+                    shutil.copytree(process_cluster_last_path, process_output_path)
+                else:     
+                    process_cluster_pair = process_clusters[start: end]
+
+                    # Start processes
+                    futures.append(
+                        proecess_executor.submit(
+                            process_cluster_chunk, 
+                            process_number, 
+                            process_cluster_pair[0], 
+                            process_cluster_pair[1],
+                            prover_path, 
+                            num_threads,  
+                            output_path, 
+                            timeout
+                        )
+                    )
+                    process_number += 1
+        else:
+            # Create chunks
             axioms_N = axioms[start: end]
             conjs_N = conjs[start: end]
             txt_N = txt_lines[start: end]
 
-            if clusters_paths:
-                clusters_paths_N = clusters_paths[start: end]
-
-                # start processes
-                futures.append(
-                    proecess_executor.submit(
-                        process_cluster_chunk, 
-                        start, 
-                        axioms_N, 
-                        conjs_N, 
-                        txt_N, 
-                        clusters_paths_N,
-                        prover_path, 
-                        num_threads, 
-                        input_path, 
-                        output_path, 
-                        timeout
-                    )
+            # Start processes
+            futures.append(
+                proecess_executor.submit(
+                    process_chunk, 
+                    start, 
+                    axioms_N, 
+                    conjs_N, 
+                    txt_N, 
+                    prover_path, 
+                    num_threads, 
+                    input_path, 
+                    output_path, 
+                    timeout 
                 )
-            else:
-                # start processes
-                futures.append(
-                    proecess_executor.submit(
-                        process_chunk, 
-                        start, 
-                        axioms_N, 
-                        conjs_N, 
-                        txt_N, 
-                        prover_path, 
-                        num_threads, 
-                        input_path, 
-                        output_path, 
-                        timeout
-                    )
-                )
+            )
 
-        # get completed processes' results
+        # Get completed processes' results
         for fut in concurrent.futures.as_completed(futures):
             fut.result()
 
-    # Stop the CPU monitor and get the average CPU usage
-    # cpu_monitor.stop()
-    # cpu_monitor.join()
-    # avg_cpu = cpu_monitor.get_average_usage()
-
     print(f"Done. Processed all .tptp files. Time {(time.time() - start_time) / 3600} hours")
-    # print(f"Average CPU usage across all cores: {avg_cpu:.2f}%")
 
 
 if __name__ == "__main__":
