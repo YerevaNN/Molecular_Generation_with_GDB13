@@ -177,24 +177,13 @@ def run_vampire(axiom_line, conj_line, vampire_path, show_progress, indx, timeou
 
 def worker_fn(task, prover_path, timeout, show_progress, indx):
     """Top-level function for parallel calls."""
-    i_indx, ax_line, conj_line = task
+    indx, ax_line, conj_line = task
 
     if "vampire" in prover_path:
         res = run_vampire(ax_line, conj_line, prover_path, show_progress, indx, timeout)
     else:
         raise NameError("There is no such a prover")    
-    return (i_indx,  res)
-
-
-def worker_fn_for_batch(task, prover_path, timeout, show_progress, indx):
-    """Top-level function for parallel calls."""
-    i_indx, j_indx, ax_line, conj_line = task
-
-    if "vampire" in prover_path:
-        res = run_vampire(ax_line, conj_line, prover_path, show_progress, indx, timeout)
-    else:
-        raise NameError("There is no such a prover")    
-    return (i_indx, j_indx, res)
+    return (indx,  res)
 
 
 async def write_line_to_file(
@@ -274,11 +263,7 @@ async def async_copy_file(src: str, dst: str):
 def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout, show_progress, indx):
     equivalence_result = [-1, -1]
 
-    # change places of axiom and conj
-    conj_line_to_axiom = conj_line.replace(", conjecture,", ", axiom,")
-    axiom_line_to_conj = axiom_line.replace(", axiom,", ", conjecture,")
-
-    current_pair = [[0, axiom_line, conj_line], [1, conj_line_to_axiom, axiom_line_to_conj]]     
+    current_pair = [[0, axiom_line, conj_line], [1, conj_line, axiom_line]]   
 
     futures = [
         executor.submit(worker_fn, t, prover_path, timeout, show_progress, indx)
@@ -286,53 +271,13 @@ def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout, sho
     ]
 
     for fut in concurrent.futures.as_completed(futures):
-        res_indx, res_val = fut.result()
-        equivalence_result[res_indx] = res_val
+        indx, res_val = fut.result()
+        equivalence_result[indx] = res_val
 
         if res_val == -1 and show_progress:
             logging.error(f"Unexpected value for axiom ({axiom_line})")
 
     return equivalence_result  
-
-
-def check_equivalence_batch(path_batch, axiom_line_batch, conj_line, executor, prover_path, timeout, show_progress, indx):
-    current_pairs = []
-    equivalence_results = {}
-
-    # Change conj to be an axiom
-    conj_line_to_axiom = conj_line.replace(", conjecture,", ", axiom,")
-
-    for i in range(len(axiom_line_batch)):
-        equivalence_results[-100, i] = -1
-        equivalence_results[i, -100] = -1
-
-        current_pairs.append([-100, i, axiom_line_batch[i], conj_line])
-
-        axiom_line_to_conj = axiom_line_batch[i].replace(", axiom,", ", conjecture,")
-        current_pairs.append([i, -100, conj_line_to_axiom, axiom_line_to_conj])   
-
-    futures = [
-        executor.submit(worker_fn_for_batch, t, prover_path, timeout, show_progress, indx)
-        for t in current_pairs
-    ]
-
-    for fut in concurrent.futures.as_completed(futures):
-        row, col, res_val = fut.result()
-        equivalence_results[row, col] = res_val
-
-    contains_undefined_results = False    
-
-    # check whether there exist any equivalence inside batch
-    for i in range(len(axiom_line_batch)):
-        if equivalence_results[-100, i] == equivalence_results[i, -100] == 1: 
-            return 1, path_batch[i]
-        elif equivalence_results[-100, i] == -1 or equivalence_results[i, -100] == -1: 
-            contains_undefined_results = True
-
-    if contains_undefined_results: 
-        return -1, ""       
-    else:
-        return 0, ""
  
 
 def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout):
@@ -353,11 +298,9 @@ async def process_chunk_async(start, axioms_N, conjs_N, txt_N, prover_path, num_
     clusters = {cluster_path: axioms_N[0]}
     await write_to_files(cluster_path, txt_N[0], axioms_N[0], mode="w") 
 
-    # Undefined files
-    parent_path = os.path.dirname(output_path)
-    undefined_path = os.path.join(parent_path, "undefined")
+    undefined_path = os.path.join(output_path, "undefined")
 
-    if not os.path.exists(os.path.join(parent_path, "undefined.txt")):
+    if not os.path.exists(os.path.join(output_path, "undefined.txt")):
         # Create a file for undefined (-1) equivalence results also
         await write_to_files(undefined_path, "", "", mode="w") 
 
@@ -421,25 +364,14 @@ async def process_cluster_chunk_async(process_number, process_cluster_pair_0, pr
 
     # Create the first cluster file inside the process_cluster
     cluster_number = 0
-    batch_size = num_threads
-    clusters_batches = []
-    current_batch = {}
+    clusters = {}
 
     for path, axiom in tqdm(zip(paths_0, axioms_0)):
         cluster_path = os.path.join(process_output_path, path.split("/")[-1])
         await copy_files(old_path=path, new_path=cluster_path)
         cluster_number += 1
 
-        current_batch[cluster_path] = axiom 
-
-        if len(current_batch) >= batch_size:
-            clusters_batches.append(current_batch)
-            current_batch = {}  
-
-    # Append last batch also
-    if current_batch:
-        clusters_batches.append(current_batch)
-        current_batch = {}     
+        clusters[cluster_path] = axiom    
     
     # Undefined files
     parent_path = os.path.dirname(output_path)
@@ -460,20 +392,17 @@ async def process_cluster_chunk_async(process_number, process_cluster_pair_0, pr
 
             vampire_calls = 0
 
-            for batch in clusters_batches:
-                cluster_path_batch = list(batch.keys())
-                cluster_tptp_batch = list(batch.values())
-        
-                equivalence_result, cluster_path = check_equivalence_batch(cluster_path_batch, cluster_tptp_batch, conj_line, thread_executor, prover_path, timeout, show_progress, indx)
-                vampire_calls += len(cluster_path_batch)
+            for cluster_path, cluster_tptp in clusters.items():
+                equivalence_result = check_equivalence(cluster_tptp, conj_line, thread_executor, prover_path, timeout, show_progress, indx)
+                vampire_calls += 1
                 
-                if equivalence_result == 1:
+                if equivalence_result[0] == equivalence_result[1] == 1:
                     belongs_to_a_cluster = True
                     # merge .txt and .tptp clusters
                     await merge_files(cluster_path, paths_1[indx])
                     break
 
-                if equivalence_result == -1:
+                if equivalence_result[0] == -1 or equivalence_result[1] == -1:
                     contains_undefined_results = True
 
             if not belongs_to_a_cluster and contains_undefined_results:
@@ -590,31 +519,26 @@ def main():
                     )
                     process_number += 1
         else:
-            for start in range(0, axioms_len, chunk_size):
+            # Create chunks
+            axioms_N = axioms[start: end]
+            conjs_N = conjs[start: end]
+            txt_N = txt_lines[start: end]
 
-                # In case axioms_len is not divisable to chunk_size
-                end = min(start + chunk_size, axioms_len)
-
-                # Create chunks
-                axioms_N = axioms[start: end]
-                conjs_N = conjs[start: end]
-                txt_N = txt_lines[start: end]
-
-                # Start processes
-                futures.append(
-                    proecess_executor.submit(
-                        process_chunk, 
-                        start, 
-                        axioms_N, 
-                        conjs_N, 
-                        txt_N, 
-                        prover_path, 
-                        num_threads, 
-                        input_path, 
-                        output_path, 
-                        timeout 
-                    )
+            # Start processes
+            futures.append(
+                proecess_executor.submit(
+                    process_chunk, 
+                    start, 
+                    axioms_N, 
+                    conjs_N, 
+                    txt_N, 
+                    prover_path, 
+                    num_threads, 
+                    input_path, 
+                    output_path, 
+                    timeout 
                 )
+            )
 
         # Get completed processes' results
         for fut in concurrent.futures.as_completed(futures):
