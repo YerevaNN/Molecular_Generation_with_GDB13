@@ -303,13 +303,13 @@ def check_equivalence_batch(path_batch, axiom_line_batch, conj_line, executor, p
     conj_line_to_axiom = conj_line.replace(", conjecture,", ", axiom,")
 
     for i in range(len(axiom_line_batch)):
-        equivalence_results[-100, i] = -1
-        equivalence_results[i, -100] = -1
+        equivalence_results[-1, i] = -100
+        equivalence_results[i, -1] = -100
 
-        current_pairs.append([-100, i, axiom_line_batch[i], conj_line])
+        current_pairs.append([-1, i, axiom_line_batch[i], conj_line])
 
         axiom_line_to_conj = axiom_line_batch[i].replace(", axiom,", ", conjecture,")
-        current_pairs.append([i, -100, conj_line_to_axiom, axiom_line_to_conj])   
+        current_pairs.append([i, -1, conj_line_to_axiom, axiom_line_to_conj])   
 
     futures = [
         executor.submit(worker_fn_for_batch, t, prover_path, timeout, show_progress, indx)
@@ -318,15 +318,15 @@ def check_equivalence_batch(path_batch, axiom_line_batch, conj_line, executor, p
 
     for fut in concurrent.futures.as_completed(futures):
         row, col, res_val = fut.result()
-        equivalence_results[row, col] = res_val
-
-    contains_undefined_results = False    
+        equivalence_results[row, col] = res_val   
 
     # check whether there exist any equivalence inside batch
+    contains_undefined_results = False 
+
     for i in range(len(axiom_line_batch)):
-        if equivalence_results[-100, i] == equivalence_results[i, -100] == 1: 
+        if equivalence_results[-1, i] == equivalence_results[i, -1] == 1: 
             return 1, path_batch[i]
-        elif equivalence_results[-100, i] == -1 or equivalence_results[i, -100] == -1: 
+        elif equivalence_results[-1, i] == -1 or equivalence_results[i, -1] == -1: 
             contains_undefined_results = True
 
     if contains_undefined_results: 
@@ -334,6 +334,62 @@ def check_equivalence_batch(path_batch, axiom_line_batch, conj_line, executor, p
     else:
         return 0, ""
  
+
+def check_equivalence_batch_optimized(path_batch, axiom_line_batch, conj_line, executor, prover_path, timeout, show_progress, indx):
+    current_pairs_forward = []
+    current_pairs_backward = []
+    equivalence_results = {}
+
+    # Change conj to be an axiom
+    conj_line_to_axiom = conj_line.replace(", conjecture,", ", axiom,")
+
+    for i in range(len(axiom_line_batch)):
+        equivalence_results[-1, i] = -100
+        equivalence_results[i, -1] = -100
+
+        current_pairs_forward.append([-1, i, axiom_line_batch[i], conj_line])
+
+    # Give only forward pairs
+    futures = [
+        executor.submit(worker_fn_for_batch, t, prover_path, timeout, show_progress, indx)
+        for t in current_pairs_forward
+    ]
+
+    for fut in concurrent.futures.as_completed(futures):
+        row, col, res_val = fut.result()
+        equivalence_results[row, col] = res_val
+
+        if res_val == 1:
+            axiom_line_to_conj = axiom_line_batch[col].replace(", axiom,", ", conjecture,")
+            current_pairs_backward.append([col, -1, conj_line_to_axiom, axiom_line_to_conj]) 
+
+    # If any of forward pairs gives 1, then go check its backward pair
+    if current_pairs_backward:
+        futures = [
+            executor.submit(worker_fn_for_batch, t, prover_path, timeout, show_progress, indx)
+            for t in current_pairs_backward
+        ]  
+
+        for fut in concurrent.futures.as_completed(futures):
+            row, col, res_val = fut.result()
+            equivalence_results[row, col] = res_val      
+
+        # check whether there exist any equivalence inside batch
+        contains_undefined_results = False   
+        
+        for i in range(len(axiom_line_batch)):
+            if equivalence_results[-1, i] == equivalence_results[i, -1] == 1: 
+                return 1, path_batch[i]
+            elif equivalence_results[-1, i] == -1 or equivalence_results[i, -1] == -1: 
+                contains_undefined_results = True
+
+        if contains_undefined_results: 
+            return -1, ""       
+        else:
+            return 0, ""   
+    else:
+        return 0, "" 
+
 
 def process_chunk(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout):
     asyncio.run(process_chunk_async(start, axioms_N, conjs_N, txt_N, prover_path, num_threads, input_path, output_path, timeout))
@@ -451,7 +507,7 @@ async def process_cluster_chunk_async(process_number, process_cluster_pair_0, pr
     if show_progress:
         print(f"Start with {line_count_start} clusters.")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as thread_executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as thread_executor:
         for indx, conj_line in tqdm(enumerate(conjs_1), disable=not show_progress):
             start_time = time.time()
             
