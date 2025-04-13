@@ -177,13 +177,13 @@ def run_vampire(axiom_line, conj_line, vampire_path, show_progress, indx, timeou
 
 def worker_fn(task, prover_path, timeout, show_progress, indx):
     """Top-level function for parallel calls."""
-    indx, ax_line, conj_line = task
+    i_indx, ax_line, conj_line = task
 
     if "vampire" in prover_path:
         res = run_vampire(ax_line, conj_line, prover_path, show_progress, indx, timeout)
     else:
         raise NameError("There is no such a prover")    
-    return (indx,  res)
+    return (i_indx,  res)
 
 
 async def write_line_to_file(
@@ -263,7 +263,11 @@ async def async_copy_file(src: str, dst: str):
 def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout, show_progress, indx):
     equivalence_result = [-1, -1]
 
-    current_pair = [[0, axiom_line, conj_line], [1, conj_line, axiom_line]]   
+    # change places of axiom and conj
+    conj_line_to_axiom = conj_line.replace(", conjecture,", ", axiom,")
+    axiom_line_to_conj = axiom_line.replace(", axiom,", ", conjecture,")
+
+    current_pair = [[0, axiom_line, conj_line], [1, conj_line_to_axiom, axiom_line_to_conj]]     
 
     futures = [
         executor.submit(worker_fn, t, prover_path, timeout, show_progress, indx)
@@ -271,8 +275,8 @@ def check_equivalence(axiom_line, conj_line, executor, prover_path, timeout, sho
     ]
 
     for fut in concurrent.futures.as_completed(futures):
-        indx, res_val = fut.result()
-        equivalence_result[indx] = res_val
+        res_indx, res_val = fut.result()
+        equivalence_result[res_indx] = res_val
 
         if res_val == -1 and show_progress:
             logging.error(f"Unexpected value for axiom ({axiom_line})")
@@ -298,9 +302,11 @@ async def process_chunk_async(start, axioms_N, conjs_N, txt_N, prover_path, num_
     clusters = {cluster_path: axioms_N[0]}
     await write_to_files(cluster_path, txt_N[0], axioms_N[0], mode="w") 
 
-    undefined_path = os.path.join(output_path, "undefined")
+    # Undefined files
+    parent_path = os.path.dirname(output_path)
+    undefined_path = os.path.join(parent_path, "undefined")
 
-    if not os.path.exists(os.path.join(output_path, "undefined.txt")):
+    if not os.path.exists(os.path.join(parent_path, "undefined.txt")):
         # Create a file for undefined (-1) equivalence results also
         await write_to_files(undefined_path, "", "", mode="w") 
 
@@ -519,26 +525,31 @@ def main():
                     )
                     process_number += 1
         else:
-            # Create chunks
-            axioms_N = axioms[start: end]
-            conjs_N = conjs[start: end]
-            txt_N = txt_lines[start: end]
+            for start in range(0, axioms_len, chunk_size):
 
-            # Start processes
-            futures.append(
-                proecess_executor.submit(
-                    process_chunk, 
-                    start, 
-                    axioms_N, 
-                    conjs_N, 
-                    txt_N, 
-                    prover_path, 
-                    num_threads, 
-                    input_path, 
-                    output_path, 
-                    timeout 
+                # In case axioms_len is not divisable to chunk_size
+                end = min(start + chunk_size, axioms_len)
+
+                # Create chunks
+                axioms_N = axioms[start: end]
+                conjs_N = conjs[start: end]
+                txt_N = txt_lines[start: end]
+
+                # Start processes
+                futures.append(
+                    proecess_executor.submit(
+                        process_chunk, 
+                        start, 
+                        axioms_N, 
+                        conjs_N, 
+                        txt_N, 
+                        prover_path, 
+                        num_threads, 
+                        input_path, 
+                        output_path, 
+                        timeout 
+                    )
                 )
-            )
 
         # Get completed processes' results
         for fut in concurrent.futures.as_completed(futures):
