@@ -2,6 +2,9 @@ import os
 import sys
 import csv
 import time
+import random
+import numpy as np
+from tqdm import tqdm
 from typing import Any
 from typing import Union, Optional
 
@@ -11,11 +14,23 @@ from torch import Tensor
 
 import argparse
 from accelerate import Accelerator
-from transformers import OPTForCausalLM, PreTrainedTokenizerFast
+from transformers import OPTForCausalLM, PreTrainedTokenizerFast, LlamaForCausalLM
 
 from utils.get_tokenizer import get_tokenizer
 from utils.data_preprocessing import to_dataloader
 from utils.sm_sf_processing import rand_to_canon_str
+
+
+
+def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 def top_k_sampling(logits: Tensor, k: int) -> Tensor:
     """
@@ -128,8 +143,7 @@ def calc_sequence_prob(
             decoded_seq = rand_to_canon_str(sequence=decoded_seq, str_type=str_type)
         target_seq.append(decoded_seq)
 
-
-    # Preoare logits and targets
+    # Prepare logits and targets
     logits = (model(inputs).logits)             # shape: [batch_size, seq_length, vocab_size]
     logits = logits.view(-1, logits.size(-1))   # shape: [batch_size * seq_length, vocab_size]
     targets = targets.contiguous().view(-1)     # shape: [batch_size * seq_length]
@@ -144,14 +158,15 @@ def calc_sequence_prob(
         probs = top_p_sampling(logits, top_p)
     else: 
         probs = torch.softmax(logits, dim=-1)
-
     log_probs = torch.log(probs)        # shape: [batch_size * seq_length, vocab_size]
 
     # Calculate probabilities 
     loss = nn.NLLLoss(ignore_index=pad_id, reduction='none')
     log_token_probs = -loss(log_probs, targets)
-    log_seq_probs = log_token_probs.view(inputs.size(0), -1).sum(-1)
-    seq_probs = torch.exp((log_seq_probs)).tolist()    
+    log_seq_probs = log_token_probs.view(inputs.size(0), -1)
+    log_seq_probs = log_seq_probs.sum(-1)
+
+    seq_probs = torch.exp((log_seq_probs)).tolist()  
 
     rows = [[str_repr, prob] for str_repr, prob in zip(target_seq, seq_probs)] 
 
@@ -169,23 +184,6 @@ def write_probs_csv(
     save_type: str,
     str_type: str,
 ) -> None:
-    """
-    Writes sequence probabilities to a CSV file.
-
-    Parameters:
-    - output_path (str): Path to the output CSV file.
-    - model (OPTForCausalLM): The model used for generating probabilities.
-    - tokenizer (PreTrainedTokenizerFast): The tokenizer used for processing text.
-    - data_loader (Any): DataLoader providing the input and target data.
-    - top_k (Optional[int]): The number of highest probability tokens to keep.
-    - top_p (Optional[float]): Cumulative probability for nucleus sampling.
-    - temperature (Optional[float]): Temperature parameter for sampling.
-    - save_type (str): Type of saving (e.g., 'checkpoint').
-    - str_type (str): Type of string processing (e.g., 'text').
-
-    Raises:
-    - SystemExit: If the output file already exists.
-    """
 
     if os.path.exists(output_path):
         print(f"Error: {output_path} already exists.")
@@ -195,7 +193,8 @@ def write_probs_csv(
         writer = csv.writer(file)
         writer.writerow(["Name", "Probability"])
         
-        for inputs in data_loader:
+        print("Calculating probabilities ...")
+        for inputs in tqdm(data_loader):
             probabilities = calc_sequence_prob(
                 model=model,
                 tokenizer=tokenizer,
@@ -280,6 +279,7 @@ def parse_args():
 if __name__ == "__main__":
 
     args = parse_args()
+    seed_everything(2)
 
     accelerator = Accelerator()
 
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     batch_size = args.batch_size
 
     # Prepare the tokenizer
-    tokenizer = get_tokenizer(tokenizer_path=tokenizer_path)
+    tokenizer = get_tokenizer(tokenizer_path, 192)
         
     # Get the dataloader
     time1 = time.time()

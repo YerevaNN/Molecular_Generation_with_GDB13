@@ -11,16 +11,16 @@
 
 export LR="4.00E-04"
 export BS="128"
-export MODEL="OPT_125m_ep_1_all_canon_sf_848M"
+export MODEL="OPT_800K_ep_1_all_rand_sf_848M"
 export GRAD_ACC="64"
 export LOSS_TYPE="mean"
 
 
-accelerate launch --config_file ../accelerate_fsdp_config.yaml \
+accelerate launch --config_file ../accelerate_fsdp_config_1.yaml \
      ../src/train_with_molecular_batch.py \
     --seed 1 \
     --output_dir ../src/checkpoints/pre_trained/$MODEL \
-    --dataset_name ../src/data/data/data_bin_all_canon_sf_848M \
+    --dataset_name ../src/data/data/data_bin_all_rand_sf_848M \
     --tokenizer_name ../src/data/tokenizers/tokenizer_sf/tokenizer.json \
     --resume_from_checkpoint "" \
     --do_train \
@@ -54,7 +54,7 @@ accelerate launch --config_file ../accelerate_fsdp_config.yaml \
     --per_device_eval_batch_size $BS \
     --report_to none \
     --save_safetensors False \
-    --aim_exp_name "$MODEL"_"$LR"_"bs_4x$GRAD_ACC"x"$BS"_"hf, lr=$LR, pre-train 125m model." \
+    --aim_exp_name "$MODEL"_"$LR"_"bs_4x$GRAD_ACC"x"$BS"_"hf, lr=$LR, pre-train 800K model for data prep." \
     --aim_repo_dir "../" \
     --train_with_sample_size 0 \
     --gradient_checkpointing False \
