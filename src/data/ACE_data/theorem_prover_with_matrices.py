@@ -137,8 +137,6 @@ def run_vampire(axiom_line, conj_line, vampire_path, timeout=10):
     else:
         logging.error(f"Unexpected Vampire output: {output}")
         return -1
-    
-
 
 
 def worker_fn(task, prover_path, timeout):

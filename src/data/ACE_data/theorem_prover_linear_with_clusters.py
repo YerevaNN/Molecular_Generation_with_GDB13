@@ -306,8 +306,10 @@ def check_equivalence_batch(path_batch, axiom_line_batch, conj_line, executor, p
         equivalence_results[-1, i] = -100
         equivalence_results[i, -1] = -100
 
+        # Create pair: [row, col, axiom, conj] direction: treating axiom_line_batch[i] as axiom, conj_line as conjecture.
         current_pairs.append([-1, i, axiom_line_batch[i], conj_line])
 
+        # Also create the reverse direction. Precompute the replacement for axiom_line_batch[i] once.
         axiom_line_to_conj = axiom_line_batch[i].replace(", axiom,", ", conjecture,")
         current_pairs.append([i, -1, conj_line_to_axiom, axiom_line_to_conj])   
 
@@ -478,6 +480,7 @@ async def process_cluster_chunk_async(process_number, process_cluster_pair_0, pr
     # Create the first cluster file inside the process_cluster
     cluster_number = 0
     batch_size = num_threads
+    # batch_size = 1
     clusters_batches = []
     current_batch = {}
 

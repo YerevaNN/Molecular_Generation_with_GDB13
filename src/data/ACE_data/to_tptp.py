@@ -83,7 +83,7 @@ def main():
             
             # Write results to file immediately
             mode = "w" if chunk_idx == 0 else "a"  # Overwrite first chunk, append others
-            output_txt_path = str(Path(args.output).with_suffix("")) + ".txt"
+            output_txt_path = str(Path(args.output).with_suffix("")) + "_new.txt"
 
             with open(args.output, mode, encoding="utf-8") as out_tptp:
                 with open(output_txt_path, mode, encoding="utf-8") as out_txt:

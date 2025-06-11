@@ -6,36 +6,35 @@ from nltk import CFG
 from nltk.parse.generate import generate
 from tqdm import tqdm
 
-from src.utils.general_utils import log_args
-
 
 def main(output_dir, depth):
     # Example grammar. Replace the grammar text with ACEWiki rules or another grammar.
     grammar_text = """
-    S -> NP VP
-
-    NP -> HumanNP | NonHumanNP
-
-    HumanNP -> Det HumanN | Det Adj HumanN | HumanNP2 RelClauseWho
-    HumanNP2 -> Det HumanN | Det Adj HumanN
-
-    NonHumanNP -> Det NonHumanN | Det Adj NonHumanN | NonHumanNP2 RelClauseThat
-    NonHumanNP2 -> Det NonHumanN | Det Adj NonHumanN 
-
-    RelClauseWho -> 'who' VP
-    RelClauseThat -> 'that' VP
-
-    VP -> V NP
-
-    Det -> 'a'
-    Adj -> 'big' | 'small'
-    HumanN -> 'customer' 
-    NonHumanN -> 'card'
-    V -> 'inserts' | 'uses'
+      S             -> NP VP
+      NP            -> HumanNP | NonHumanNP
+      HumanNP       -> Det HumanN | Det Adj HumanN | HumanNP2 RelClauseWho
+      HumanNP2      -> Det HumanN | Det Adj HumanN
+      NonHumanNP    -> Det NonHumanN | Det Adj NonHumanN | NonHumanNP2 RelClauseThat
+      NonHumanNP2   -> Det NonHumanN | Det Adj NonHumanN
+      RelClauseWho  -> 'who' VP
+      RelClauseThat -> 'that' VP
+      RelClauseThat -> 'that' PassiveVP
+      PassiveVP     -> 'is' PastPart 'by' NP
+      VP            -> V NP
+      Det           -> 'a'
+      Adj           -> 'big'
+      HumanN        -> 'customer'
+      NonHumanN     -> 'card'
+      V             -> 'inserts' | 'uses'
+      PastPart      -> 'inserted' | 'used'
     """
-    print(grammar_text)
+    grammar_text_simple = """
+      S -> 'a' S 'b'
+      S -> 'c'
+    """
+    print(grammar_text_simple)
 
-    grammar = CFG.fromstring(grammar_text)
+    grammar = CFG.fromstring(grammar_text_simple)
 
     # Settings
     chunk_size = 10_000_000
@@ -44,21 +43,18 @@ def main(output_dir, depth):
     start_time = time.time()
 
     # Output directory and base filename
-    output_file = os.path.join(output_dir, f"all_sentences_{depth}_vp2.txt")
-
+    output_file = os.path.join("./", f"all_sentences_{depth}_test.txt")
 
     # Checking dataset lengths till the certain depth
     # for l in range(1, d+1):
     #     print(f"Depth={l}, sentence count=", len(list(generate(grammar, depth=l))))
     # exit()
 
-
     with open(output_file, 'a') as file:
         # Generate sentences and flush to file in chunks
         for production in tqdm(generate(grammar, depth=depth), desc="Generating sentences"):
             iteration += 1
             sentence_text = " ".join(production)
-            # print(sentence_text)
             sentences_set.add(sentence_text)
             
             if iteration % chunk_size == 0:
@@ -86,13 +82,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Create dataset with the given grammar."
     )
-    parser.add_argument("--output_dir", required=True, type=str,
+    parser.add_argument("--output_dir", default="./", type=str,
                         help="Path to a folder where the txt file be created.")
-    parser.add_argument("--depth", required=True, type=int,
+    parser.add_argument("--depth", default=6, type=int,
                         help="Depth of the tree.")
     
     # Parsing args
     args = parser.parse_args()
 
-    log_args(args)
+    # log_args(args)
     main(args.output_dir, args.depth)

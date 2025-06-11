@@ -20,4 +20,4 @@ export PYTHONPATH="${SCRIPT_DIR}/..:${PYTHONPATH}"
 
 python "${SCRIPT_DIR}/../src/data/ACE_data/generate.py" \
     --output_dir /nfs/h100/raid/chem \
-    --depth 16
+    --depth 18

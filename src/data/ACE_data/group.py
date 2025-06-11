@@ -4,7 +4,7 @@ import argparse
 import os
 from tqdm import tqdm
 
-VOCAB = ['customer', 'card', 'big', 'small', 'inserts', 'uses']
+VOCAB = ['customer', 'card', 'big', 'takes', 'inserts', 'uses']
 
 def main():
     parser = argparse.ArgumentParser(

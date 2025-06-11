@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=Vampire_336528_1_level_1
+#SBATCH --job-name=Vampire_1269492_level_2
 #SBATCH --cpus-per-task=100
 #SBATCH --gres=gpu:0
 #SBATCH --mem=10gb
@@ -11,11 +11,11 @@
 
 #SBATCH --partition=all
 
-## /cf_17/clusters/big-card-customer-inserts-small/clusters_level_1
+## /cf_17_new/clusters/big-card-customer-inserts-takes/clusters_level_1
 
 python ../src/data/ACE_data/theorem_prover_linear_with_clusters.py \
-    --input_path /nfs/h100/raid/chem/cf_17/big-card-customer-inserts-small.tptp \
-    --output_path /nfs/h100/raid/chem/cf_17/clusters/big-card-customer-inserts-small \
-    --chunk_size 1000 \
+    --input_path /nfs/h100/raid/chem/cf_17_new/clusters/big-card-customer-inserts-takes/clusters_level_1 \
+    --output_path /nfs/h100/raid/chem/cf_17_new/clusters/big-card-customer-inserts-takes/clusters_level_2 \
+    --chunk_size 2 \
     --num_workers 120 \
-    --num_threads 2 \
+    --num_threads 10 \
