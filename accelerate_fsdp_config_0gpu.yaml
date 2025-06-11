@@ -7,16 +7,15 @@ fsdp_config:
   fsdp_offload_params: false
   fsdp_sharding_strategy: 1
   fsdp_state_dict_type: FULL_STATE_DICT
-  fsdp_transformer_layer_cls_to_wrap: LlamaForCausalLM
-machine_rank: 0
+  fsdp_transformer_layer_cls_to_wrap: CustomOPTForCausalLM
 main_training_function: main
-main_process_port: 32000
+main_process_port: 31100
 mixed_precision: fp16
-num_machines: 1
-num_processes: 1
+num_machines: 0
+num_processes: 0
 rdzv_backend: static
 same_network: true
 tpu_env: []
 tpu_use_cluster: false
 tpu_use_sudo: false
-use_cpu: false
+use_cpu: True

@@ -17,13 +17,29 @@ def get_tokenized_data(path_to_data, tokenizer):
         tuple: A tuple containing the padded input and target tensors.
     """
     inputs = []
-    with open(path_to_data, "r") as file:
-        for line_str in tqdm(file):
-            line_obj = json.loads(line_str)
-            sample = line_obj["text"]
+    if path_to_data.endswith("jsonl"):
+        with open(path_to_data, "r") as file:
+            for line_str in tqdm(file):
+                line_obj = json.loads(line_str)
+                sample = line_obj["text"]
+                
+                encoded_sample = tokenizer.encode(sample, add_special_tokens=True)
+                inputs.append(encoded_sample)
+    elif path_to_data.endswith("csv"):
+        with open(path_to_data, 'r') as file:
+            for line in tqdm(file):
+                line = line.strip()
+
+                if "Hypothesis" in line:
+                    continue
+
+                if "," in line:
+                    encoded_sample = tokenizer.encode(line.split(",")[0], add_special_tokens=True)
+                    inputs.append(encoded_sample)
+                else:
+                    encoded_sample = tokenizer.encode(line, add_special_tokens=True)
+                    inputs.append(encoded_sample)    
             
-            encoded_sample = tokenizer.encode(sample, add_special_tokens=True)
-            inputs.append(encoded_sample)
             
     padded_inputs = pad_sequence([torch.tensor(seq) for seq in inputs], batch_first=True, padding_value=tokenizer.pad_token_id)
     return padded_inputs

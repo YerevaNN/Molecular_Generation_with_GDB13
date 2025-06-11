@@ -106,9 +106,9 @@ def rand_to_canon_str(sequence: str, str_type: str) -> str:
     Raises:
         ValueError: If the provided str_type is unsupported.
     """
-    if str_type == 'selfies':
+    if str_type == 'sf':
         smiles = sf.decoder(sequence)
-    elif str_type == 'smiles':
+    elif str_type == 'sm':
         smiles = sequence
     else:
         raise ValueError(f"Unsupported str_type: {str_type}")
@@ -119,7 +119,7 @@ def rand_to_canon_str(sequence: str, str_type: str) -> str:
 
     canon_smiles = Chem.MolToSmiles(mol)
     
-    if str_type == 'selfies':
+    if str_type == 'sf':
         return sf.encoder(canon_smiles)
     else:
         return canon_smiles
@@ -160,9 +160,9 @@ def is_canon(str_repr: str, str_type: str = 'smiles') -> bool:
     Returns:
         bool: True if the representation is canonical, False otherwise.
     """
-    if str_type == 'selfies':
+    if str_type == 'sf':
         smiles = sf.decoder(str_repr)
-    elif str_type == 'smiles':
+    elif str_type == 'sm':
         smiles = str_repr
     else:
         raise ValueError(f"Unsupported str_type: {str_type}")
@@ -173,7 +173,7 @@ def is_canon(str_repr: str, str_type: str = 'smiles') -> bool:
 
     canon_smiles = Chem.MolToSmiles(mol)
 
-    if str_type == 'selfies':
+    if str_type == 'sf':
         canon_selfies = sf.encoder(smiles=canon_smiles)
         return canon_selfies == str_repr
 
@@ -191,9 +191,9 @@ def randomize_string(str_repr: str, str_type: str = 'smiles') -> str:
     Returns:
         str: A random SMILES or SELFIES string of the same molecule, or None if the molecule is invalid.
     """
-    if str_type == 'selfies':
+    if str_type == 'sf':
         smiles = sf.decoder(str_repr)
-    elif str_type == 'smiles':
+    elif str_type == 'sm':
         smiles = str_repr
     else:
         raise ValueError(f"Unsupported str_type: {str_type}")
@@ -207,10 +207,11 @@ def randomize_string(str_repr: str, str_type: str = 'smiles') -> str:
     random_mol = Chem.RenumberAtoms(mol, newOrder=new_atom_order)
     random_smiles = Chem.MolToSmiles(random_mol, canonical=True, doRandom=True, isomericSmiles=False)
 
-    if str_type == 'selfies':
+    if str_type == 'sf':
         return sf.encoder(random_smiles)
     
     return random_smiles
+
 
 def get_rand_set(str_repr: str, str_type: str = 'smiles', iter_len: int = 100000) -> Set[str]:
     """

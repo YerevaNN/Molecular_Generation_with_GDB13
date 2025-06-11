@@ -1,9 +1,9 @@
 from tokenizers import Tokenizer
 from transformers import PreTrainedTokenizerFast
 
-def get_tokenizer(tokenizer_path: str) -> PreTrainedTokenizerFast:
+def get_tokenizer(tokenizer_path: str, vocab_size: int) -> PreTrainedTokenizerFast:
     """
-    Convert a tokenizer file to a Transformer's PreTrainedTokenizerFast and ensure it has 192 tokens.
+    Convert a tokenizer file to a Transformer's PreTrainedTokenizerFast
 
     Args:
         tokenizer_path (str): Path to the tokenizer file.
@@ -19,11 +19,11 @@ def get_tokenizer(tokenizer_path: str) -> PreTrainedTokenizerFast:
     except Exception as e:
         raise ValueError(f"Error loading tokenizer from {tokenizer_path}: {e}")
 
-    # Ensure the tokenizer has 192 tokens
+    # Ensure the tokenizer has vocab_size tokens
     try:
-        vocab_size = len(tokenizer.get_vocab())
-        if vocab_size != 192:
-            for i in range(vocab_size, 192):
+        tokenizer_vocab_size = len(tokenizer.get_vocab())
+        if tokenizer_vocab_size != vocab_size:
+            for i in range(tokenizer_vocab_size, vocab_size):
                 symbol = f"madeupword{i:03d}"
                 tokenizer.add_tokens(symbol)
         return tokenizer

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=GenAspTemp
-#SBATCH --cpus-per-task=10
+#SBATCH --job-name=GenAsp1Temp
+#SBATCH --cpus-per-task=50
 #SBATCH --gres=gpu:1
 #SBATCH --mem=20gb
 #SBATCH --time=100:00:00
@@ -10,7 +10,7 @@
 #SBATCH --error=logging/%x_%j.err
 
 
-export N=4
+export N=1
 export GEN_LEN=$((N * 1000000))
 export GEN_LEN_STR=$N"M" 
 
@@ -22,7 +22,7 @@ export TOP_P=1.0
 export TEMPERATURE=1.0
 export MODEL="OPT_1.2B_ep_1_all_canon_finetune_all_canon_aspirin_0.4_sf_1000K_8.00E-05"
 
-for temp in 0.6 0.8 1.0 1.2 1.5
+for temp in 0.6 0.8 1.5
 do
      accelerate launch --config_file ../accelerate_fsdp_config_gen_opt.yaml \
           ../src/generate.py \
@@ -34,5 +34,5 @@ do
      --vocab_size $VOCAB_SIZE \
      --top_k $TOP_K \
      --top_p $TOP_P \
-     --temperature $TEMPERATURE
+     --temperature $temp
 done     

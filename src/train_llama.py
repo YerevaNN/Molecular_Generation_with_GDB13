@@ -27,41 +27,32 @@ import os
 import sys
 import glob
 import random
-import warnings
 from dataclasses import dataclass, field
-from itertools import chain
 from typing import Optional, List
-import datetime
 
 import datasets
-import evaluate
 import torch
 import torch.nn.functional as F
 from datasets import load_dataset, load_from_disk
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
-import torch.distributed as dist
 
 import transformers
 from transformers import (
-    CONFIG_MAPPING,
     MODEL_FOR_CAUSAL_LM_MAPPING,
     AutoConfig,
-    AutoModelForCausalLM,
-    AutoTokenizer,
     OPTForCausalLM,
     PreTrainedTokenizerFast,
     DataCollatorWithPadding,
     HfArgumentParser,
     Trainer,
     TrainingArguments,
-    default_data_collator,
-    is_torch_tpu_available,
     set_seed,
+    LlamaForCausalLM
 )
+
 from transformers.testing_utils import CaptureLogger
-from transformers.trainer_utils import get_last_checkpoint, seed_worker
-from transformers.utils import check_min_version, send_example_telemetry
+from transformers.trainer_utils import seed_worker
 from transformers.utils.generic import PaddingStrategy
 from transformers.utils.versions import require_version
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -70,8 +61,7 @@ from transformers.utils.import_utils import is_datasets_available
 
 
 from tokenizers import (
-        Tokenizer,
-        processors
+        Tokenizer
 )
 from aim.hugging_face import AimCallback
 
@@ -330,6 +320,7 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
         max_length: Optional[int] = None,
         padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
     ) -> dict:
         # Load from model defaults
@@ -352,24 +343,24 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
 
         if needs_to_be_padded:
             difference = max_length - len(required_input)
+            padding_side = padding_side if padding_side is not None else self.padding_side
 
-            if self.padding_side == "right":
+            if padding_side == "right":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
                 if "token_type_ids" in encoded_inputs:
                     encoded_inputs["token_type_ids"] = (
                         encoded_inputs["token_type_ids"] + [self.pad_token_type_id] * difference
                     )
-                # by overriding add dynamic padding for labels also     
+                 # by overriding add dynamic padding for labels also     
                 if "labels" in encoded_inputs:
                     encoded_inputs["labels"] = (
                         encoded_inputs["labels"] + [self.pad_token_id] * difference
-                    )
-
+                    )    
                 if "special_tokens_mask" in encoded_inputs:
                     encoded_inputs["special_tokens_mask"] = encoded_inputs["special_tokens_mask"] + [1] * difference
                 encoded_inputs[self.model_input_names[0]] = required_input + [self.pad_token_id] * difference
-            elif self.padding_side == "left":
+            elif padding_side == "left":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
                 if "token_type_ids" in encoded_inputs:
@@ -387,7 +378,7 @@ class CustomPreTrainedTokenizerFast(PreTrainedTokenizerFast):
 
                 encoded_inputs[self.model_input_names[0]] = [self.pad_token_id] * difference + required_input
             else:
-                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+                raise ValueError(f"Invalid padding strategy:{padding_side}")    
 
         return encoded_inputs    
 
@@ -401,6 +392,10 @@ def molecularLoss(shift_logits, shift_labels, loss_type="mean"):
     flat_logits = shift_logits.view(-1, shift_logits.shape[-1])
     # Shape (batch_size x seq_len)
     flat_labels = shift_labels.view(-1)
+
+    return CrossEntropyLoss(reduction="mean", ignore_index=-100)
+
+
 
     # It's OK to put reduction="none" as there are no -100s, it counts paddings
     ce_loss_fn = CrossEntropyLoss(reduction="none", ignore_index=-100)
@@ -564,6 +559,7 @@ class CustomOPTForCausalLM(OPTForCausalLM):
             attentions=outputs.attentions,
         )
     
+    
 def get_normalized_probs(logits, log_probs, sample=None):
         """Get normalized probabilities (or log probs) from a net's output."""
         if torch.is_tensor(logits):
@@ -578,7 +574,9 @@ def main():
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    training_args.gradient_checkpointing_kwargs={"use_reentrant": False}
+    training_args.gradient_checkpointing_kwargs={"use_reentrant": False}git status
+    
+   
 
     # Setup logging
     logging.basicConfig(
@@ -623,11 +621,15 @@ def main():
         config = AutoConfig.from_pretrained(model_args.config_name)
 
         # Change some config parameters
-        config.vocab_size = model_args.vocab_size or config.vocab_size 
+        config.vocab_size = model_args.vocab_size or config.vocab_size
         config.dropout = model_args.dropout if model_args.dropout is not None else config.dropout
         config.max_position_embeddings = model_args.max_position_embeddings or config.max_position_embeddings
         config.use_cache = False
+        config.bos_token_id = 0
+        config.eos_token_id = 2
+
         logger.info(f"Overriding config: {config}") 
+   
 
     if model_args.tokenizer_name:
         tokenizer = Tokenizer.from_file(model_args.tokenizer_name)
@@ -728,7 +730,9 @@ def main():
                     keep_in_memory=True
                 )
 
-        tokenized_datasets.save_to_disk(f"{data_args.dataset_name}_tokenized")           
+        tokenized_datasets.save_to_disk(f"{data_args.dataset_name}_tokenized")     
+        print("Dataset is created.")
+        
 
     train_dataset, eval_dataset = tokenized_datasets["train"], tokenized_datasets["valid"]
 
@@ -741,9 +745,14 @@ def main():
         tokenizer=tokenizer, 
         padding=True
         )
+    
+    print("Tokenizer len:", len(tokenizer))
 
     logger.info(f"Train with {training_args.loss_type} Loss")  
-    model = CustomOPTForCausalLM(config, loss_type=training_args.loss_type)
+    model = LlamaForCausalLM(config)
+
+    # for IndexError
+    model.resize_token_embeddings(len(tokenizer))
 
     if model_args.finetune_from_checkpoint:
         logger.info(f"Fine-tuning from path {model_args.finetune_from_checkpoint}")
@@ -767,12 +776,10 @@ def main():
         @torch.no_grad()
         def compute_perplexity(eval_preds, base=2):
             logits, labels = eval_preds
-
             logits = torch.FloatTensor(logits)
             labels = torch.LongTensor(labels)
 
             labels = labels.to(logits.device)
-
             # Shift so that tokens < n predict n, shape(bs, seq_len, vocab_size)
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
@@ -782,7 +789,7 @@ def main():
             flat_labels = shift_labels.view(-1)
 
             # Shape(bs x seq_len, vocab_size)
-            mask_labels = (flat_labels != 1)
+            mask_labels = (flat_labels != 1) & (flat_labels != -100)
             # Shape(bs x seq_len)
             mask_logits = mask_labels.unsqueeze(1).repeat_interleave(flat_logits.shape[-1], dim=-1)
 
@@ -794,7 +801,7 @@ def main():
             flat_labels_reduced = flat_labels[mask_labels]
 
             # Compute loss, shape(bs x seq_len)
-            loss_fct = CrossEntropyLoss(reduction="mean", ignore_index=-100)
+            loss_fct = CrossEntropyLoss(reduction="mean")
 
             loss = loss_fct(flat_logits_reduced, flat_labels_reduced)
 
@@ -810,7 +817,7 @@ def main():
             # Make float64 for high precision, shape(bs x seq_len)
             logits_log_selected = logits_log_selected.double()
 
-            # Reshape, otherwise the sum of all log probabilities would be too small, shape(bs, seq_len)
+            # Reshape, otherwise the sum of the all log probabilities would be too small, shape(bs, seq_len)
             logits_log_selected = logits_log_selected.reshape(logits.shape[0], -1)
 
             # Replace id=-100 (as HF padding) log-probabilities to 0
