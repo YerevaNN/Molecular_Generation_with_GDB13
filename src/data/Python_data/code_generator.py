@@ -2,6 +2,7 @@
 
 import ast
 import time
+import copy
 import builtins
 import argparse
 import itertools
@@ -22,7 +23,7 @@ class CodeGenerator:
         # Dictionary containing context-free grammar rules.
         self.cfg_rules = {
                 # Variables and digits
-                "VARIABLE": ["a", "b"],
+                "VARIABLE": ["a", "b", "c"],
                 "DIGIT": ["7", "8"],
 
                 # Operators
@@ -146,6 +147,7 @@ class CodeGenerator:
             
                 "ALL": ["LEVEL1.1", "LEVEL1.2", "LEVEL2.1", "LEVEL2.2", "LEVEL3.1", "LEVEL3.2", "LEVEL4.1"],
         }
+  
 
     def generate_all_codes(self,
                             symbol: str,
@@ -161,7 +163,10 @@ class CodeGenerator:
 
         Yields:
         - str: one fully expanded code fragment for this symbol
-        """
+        """ 
+        def child_step():
+            return dict(for_init_step)
+        
         # Initialize state containers if first call
         if for_init_step is None:
             for_init_step = {}
@@ -193,7 +198,7 @@ class CodeGenerator:
                 subexpansions = list(
                     self.generate_all_codes(
                         part,
-                        for_init_step=for_init_step,
+                        for_init_step=child_step(),
                         depth=depth - 1
                     )
                 )
@@ -312,7 +317,7 @@ def main(args):
             is_valid = check_validenss(prog)
             errors = find_undeclared_vars(prog)
 
-            if is_valid and not errors:
+            if is_valid and not errors and (prog not in all_programs):
                 f.write(prog + '\n\n')
                 all_programs.add(prog)
 
@@ -320,15 +325,20 @@ def main(args):
 
 
 if __name__ == "__main__":
-    levels = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2"]
+    # levels = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2"]
+    levels = ["3.2"]
+    depth = 8
+    vars = 3
 
     for level in levels:
-        print("Generating from level:", level)
+        print("Generating from level:", level, "depth:", depth, "vars:", vars)
 
         parser = argparse.ArgumentParser(description="Exhaustive CFG code generator.")
         parser.add_argument('--level', default=level)
-        parser.add_argument('--depth', type=int, default=8)
-        parser.add_argument('--outfile', default=f"exhaustive_generations/data_level_{level}_depth_8_corrected_new.txt")
+        parser.add_argument('--depth', type=int, default=depth)
+        parser.add_argument('--outfile', default=f"/nfs/dgx/raid/molgen/code_recall/data/data_level_{level}_depth_{depth}_{vars}_vars_new.txt")
+        # parser.add_argument('--outfile', default=f"./exhaustive_generations/data_level_{level}_depth_{depth}_{vars}_vars_check.txt")
+        # parser.add_argument('--outfile', default=f"data_level_{level}_depth_{depth}_{vars}_vars_check.txt")
         args = parser.parse_args()
 
         main(args)

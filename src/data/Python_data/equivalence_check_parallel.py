@@ -108,11 +108,11 @@ def main():
     output_folder = "/nfs/dgx/raid/molgen/exhaustive_generations"
     file_name = Path(args.path).stem
     bytecode_path = os.path.join(output_folder, f"{file_name}_bytecodes.txt")
-    canon_forms_path = os.path.join(output_folder, f"{file_name}_canon_forms.txt")
+    canon_forms_path = os.path.join(output_folder, f"{file_name}_canon_forms.jsonl")
 
     seen_bytecodes = set()
     code_sample_count = 0
-    max_workers = 30
+    max_workers = 20
     buffer_size = 1000
     parallel_buffer_chunksize = 1_000_000
     canonical_forms_buffer = []
@@ -129,6 +129,9 @@ def main():
 
         for line in read_code_samples_lazy(args.path):
             parallel_buffer.append(line)
+
+            if code_sample_count % 1_000_000 == 0:
+                print(f"Number of proceed samples: {code_sample_count}")
 
             if len(parallel_buffer) > parallel_buffer_chunksize:
                 futures = [executor.submit(process_code_block, line) for line in parallel_buffer]
@@ -170,7 +173,7 @@ def main():
                         bytecodes_buffer.clear()
                         canonical_forms_buffer.clear()
 
-        print(f"Code count is {code_sample_count}, AST count is {len(seen_bytecodes)}, Time: {((time.time() - start_time) / 3600):.2f}min")
+        print(f"Code count is {code_sample_count}, AST count is {len(seen_bytecodes)}, Time: {((time.time() - start_time) / 3600):.2f} h")
 
 
 if __name__ == "__main__":
