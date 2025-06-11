@@ -1,12 +1,21 @@
 import os
 import csv
 import time
-import torch
 import argparse
+from tqdm import tqdm
+import pandas as pd
+
+import torch
 from torch.utils.data import TensorDataset, DataLoader
 from transformers import OPTForCausalLM
+from accelerate import Accelerator
+from torch import manual_seed
 
 from utils.get_tokenizer import get_tokenizer
+
+BOS = 0
+EOS = 2
+PAD = 1
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate strings with beam search.")
@@ -15,6 +24,12 @@ def parse_args():
         type=str,
         default=None,
         help="Pretrained tokenizer name or path if not the same as model_name",
+    )
+    parser.add_argument(
+        "--vocab_size",
+        type=int,
+        default=None,
+        help="Vocab size, tokenizer size with all added tokens.",
     )
     parser.add_argument(
         "--resume_from_checkpoint",
@@ -29,7 +44,7 @@ def parse_args():
         help="Batch size of the validation data.",
     )
     parser.add_argument(
-        "--output_beams",
+        "--output_path",
         type=str,
         default=None,
         help="The path of output beams."
@@ -49,43 +64,27 @@ def parse_args():
     parser.add_argument(
         "--iter_len",
         type=int,
-        default=32,
+        default=33,
         help="The length of iterations."
     )
     args = parser.parse_args()
 
     return args
 
-def collect_vocab_ids(tokenizer):
-    vocab_dict = tokenizer.get_vocab()
-    vocab_ids_list = []
 
-    for i in vocab_dict:
-        vocab_ids_list.append(tokenizer.encode(i)[:2])
+def write_tokens_to_csv(output_path, hypothesis_tokens, hypothesis_probs, tokenizer):
+    with open(output_path, 'w', newline='') as csvfile:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        writer = csv.writer(csvfile)
+        writer.writerow(['Hypothesis', 'NLL'])
 
-    return vocab_ids_list
+        # Iterate over each hypothesis
+        print(f"Writing in a file {output_path} ...")
+        for tokens, probs in tqdm(zip(hypothesis_tokens, hypothesis_probs)):
+            
+            hypothesis_text = tokenizer.decode(tokens, skip_special_tokens=True)
 
-
-def write_tokens_to_csv(hypothesis_tokens, tokenizer, filename):
-  """
-  Writes tokenized hypotheses and their probabilities to a CSV file.
-
-  Args:
-      hypothesis_tokens (torch.Tensor): Tensor of hypothesis token IDs (shape: (batch_size, sequence_length)).
-      hypothesis_probs (torch.Tensor): Tensor of hypothesis probabilities (shape: (batch_size,)).
-      tokenizer (transformers.PreTrainedTokenizer): Tokenizer for converting IDs to strings.
-      filename (str): Name of the CSV file to write to.
-  """
-
-  with open(filename, 'w', newline='') as csvfile:
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    writer = csv.writer(csvfile)
-    writer.writerow(['Hypothesis'])
-
-    # Iterate over each hypothesis
-    for tokens in hypothesis_tokens:
-      hypothesis_text = tokenizer.decode(tokens, skip_special_tokens=True)
-      writer.writerow([hypothesis_text])  
+            writer.writerow([hypothesis_text, probs])  
 
 
 def to_data_loader(vocab, batch_size):
@@ -94,129 +93,185 @@ def to_data_loader(vocab, batch_size):
     sequences = []
 
     for token_1 in vocab:
+        if token_1 in [BOS, EOS, PAD]:
+            continue
+
         for token_2 in vocab:
-            inputs.append([0, token_1])
+            if token_2 in [BOS, PAD]:
+                continue
+
+            inputs.append([BOS, token_1])
             targets.append([token_1, token_2])
-            sequences.append([0,token_1, token_2])
+            sequences.append([BOS, token_1, token_2])    
 
     dataset = TensorDataset(torch.tensor(inputs), torch.tensor(targets))
     data_loader = DataLoader(dataset, batch_size, shuffle=False)
+
     return data_loader, sequences
 
 
 @torch.no_grad()
-def next_iteration(model, batch_size, vocab, iter_len, gen_len):
-    model.eval()
-
+def beam_decoding(model, accelerator, batch_size, vocab, iter_len, gen_len, temp):
     time1 = time.time()
-    log_probs = []
-    data_loader, sequences = to_data_loader(vocab, batch_size=batch_size)
+    loss = torch.nn.CrossEntropyLoss(reduction='none')
+    vocab_len = len(vocab)
 
-    for input, target in data_loader:
-        input = input.to(model.device)
-        target = target.to(model.device)
+    # Get dataloader
+    data_loader, sequences = to_data_loader(vocab, batch_size)
+
+    # Give to the acclerator
+    model, data_loader = accelerator.prepare(model, data_loader)
+
+    log_probs = []
+
+    for input, target in tqdm(data_loader):
+        # shape: (batch_size, 2, vocab len)
         logits = model(input).logits
-        flatten_logits = logits.view(-1,logits.size(-1))
+
+        # shape: (batch_size x 2, vocab len)
+        flatten_logits = logits.view(-1, logits.size(-1))
+
+        # shape: (batch_size x 2)
         targets = target.view(-1)
 
-        cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
-        flat_log_probs = (-cross_entropy(flatten_logits, targets))
-        log_probs = log_probs + (flat_log_probs.view(-1,2).sum(dim=-1)).tolist()
+        # shape: (batch_size x 2)
+        flat_log_probs = -loss(flatten_logits, targets)
+        
+        # shape: (batch_size, 2)
+        flat_log_probs_sum = flat_log_probs.view(-1, 2).sum(dim=-1).tolist()
 
+        log_probs.extend(flat_log_probs_sum)   
+
+    log_probs = torch.tensor(log_probs).tolist()    
+       
     dataset = TensorDataset(torch.tensor(sequences, dtype=torch.int32), torch.tensor(log_probs, dtype=torch.float32))
-    data_loader = (DataLoader(dataset, batch_size, shuffle=False))
+    data_loader = DataLoader(dataset, batch_size, shuffle=False)
 
     print('First Iteration:', time.time() - time1)
 
-    device = 'cpu'
+    data_loader = accelerator.prepare(data_loader)
 
     with torch.no_grad():
-        for i in range(4,iter_len):
+        # In case when interation len is equal 4
+        hypothesis_probs = None
+        hypothesis_data = None
+         
+        for i in tqdm(range(4, iter_len)):
             time2 = time.time()
-            hypothesis_probs = torch.tensor([], dtype= torch.float32, device=device)
-            hypothesis_data = torch.tensor([], dtype=torch.int16, device=device)
+            hypothesis_probs = torch.tensor([], dtype= torch.float32).to(logits.device)
+            hypothesis_data = torch.tensor([], dtype=torch.int16).to(logits.device)
             
-            for sequences, log_probs in data_loader:
-                # broad_seq: torch.Size([current_batch_size * 192, seq_len])
-                broad_seq = (sequences.repeat_interleave(192,dim=0)).to(device)
+            for sequences, log_probs in tqdm(data_loader):
+                # broad_seq: torch.Size([current_batch_size * vocab_len, seq_len])
+                broad_seq = sequences.repeat_interleave(vocab_len, dim=0)
 
-                # broad_probs: torch.Size([current_batch_size * 192])
-                broad_probs = (log_probs.repeat_interleave(192)).to(device)
+                # broad_probs: torch.Size([current_batch_size * vocab_len])
+                broad_probs = log_probs.repeat_interleave(vocab_len)
 
                 current_batch_size = sequences.shape[0]
 
-                sequences = sequences.to(model.device)
-
-                if TEMPERATURE !=1.0:
-                    logits = (model(sequences).logits)/TEMPERATURE
+                if temp != 1.0:
+                    logits = (model(sequences).logits) / temp
                 else:
-                    logits = (model(sequences).logits)
-                del sequences 
+                    logits = model(sequences).logits
+                # del sequences 
 
-                last_log_probs = (torch.log_softmax(logits[:,-1,:], dim=-1)).to(device)
+                last_log_probs = torch.log_softmax(logits[:,-1,:], dim=-1)
 
-                # flat_logits: (current_batch_size * 192)
+                # make every token's probability that comes after EOS or PAD to be equal to -0.0 
+                last_log_probs[(sequences[:, -1] == EOS) | (sequences[:, -1] == PAD)] = -0.0
+
+                # flat_logits: (current_batch_size * vocab_len)
                 flat_logits = last_log_probs.view(-1)
-                del last_log_probs
+                # del last_log_probs
 
                 # Add next token to each sequence. 
-                new_tokens = torch.tensor([[i for i in range(192)]])
-                repeated_tokens = new_tokens.repeat_interleave(current_batch_size,dim=0)
-                flat_repeated_tokens = repeated_tokens.view(-1,1)
-                new_sequences = torch.cat((broad_seq,flat_repeated_tokens),1)
-                del new_tokens, repeated_tokens, flat_repeated_tokens
+                new_tokens = torch.tensor([[i for i in range(vocab_len)]]).to(logits.device)
+                repeated_tokens = new_tokens.repeat_interleave(current_batch_size, dim=0)
 
-                # Pointwise sum. new_probs: torch.Size([current_batch_size * 192])
+                # after eos token make all tokens eos in a sequence 
+                repeated_tokens[(sequences[:, -1] == EOS) | (sequences[:, -1] == PAD)] = PAD
+
+                flat_repeated_tokens = repeated_tokens.view(-1,1).to(logits.device)
+                new_sequences = torch.cat((broad_seq, flat_repeated_tokens), 1).to(logits.device)
+                # del new_tokens, repeated_tokens, flat_repeated_tokens
+
+                # Pointwise sum. new_probs: torch.Size([current_batch_size * vocab_len])
                 new_probs = (flat_logits + broad_probs)
-                del flat_logits, broad_probs
+                # del flat_logits, broad_probs
                 
                 # hypothesis_data: torch.Size([broad_seq.shape + hypothesis_data.shape])
                 hypothesis_data = torch.cat((hypothesis_data, new_sequences))
 
-                # hypothesis_probs: torch.Size([new_probs.shape + hypothesis_probs.shape])
+                # hypothesis_probs: torch.Size([new_probs.snew_probshape + hypothesis_probs.shape])
                 hypothesis_probs = torch.cat((hypothesis_probs, new_probs))
 
-                if hypothesis_probs.shape[0]>gen_len:
+                # for calculating unique values
+                hypothesis_probs = hypothesis_probs.unsqueeze(1).repeat(1, hypothesis_data.shape[-1])
+                joined_hypothesis = torch.stack((hypothesis_data, hypothesis_probs), dim=1)
+
+                # make rows unique
+                unique_joined_hypothesis = torch.unique_consecutive(joined_hypothesis, dim=0)
+                hypothesis_data = unique_joined_hypothesis[:, 0, :].to(torch.int16)
+                hypothesis_probs = unique_joined_hypothesis[:, 1, 0]
+
+                if hypothesis_probs.shape[0] > gen_len:
                     sorted_indices = hypothesis_probs.argsort(descending=True)[:gen_len]
                     hypothesis_probs = hypothesis_probs[sorted_indices]
                     hypothesis_data = hypothesis_data[sorted_indices]
 
+            del data_loader
 
-            # sorted_indices = hypothesis_probs.argsort(descending=True)[:gen_len]
-            # new_hypothesis_probs = hypothesis_probs[sorted_indices]
-            # new_hypothesis_data = hypothesis_data[sorted_indices]
-            del data_loader 
+            print(f'Time for iteration {i}:', time.time() - time2)
+
+            # Checking how many lines already have PAD
+            mask = hypothesis_data == PAD  
+            rows_with_pad = mask.any(dim=1)
+            count = rows_with_pad.sum().item()
+            print(f"The number of rows that already have PAD is {count} / {len(hypothesis_data)}")  
+
+            if count == len(hypothesis_data):
+                print(f"Break at iteration {i}")
+                break
 
             dataset = TensorDataset(hypothesis_data.to(torch.int32), hypothesis_probs)
-            data_loader = (DataLoader(dataset, batch_size, shuffle=False))
+            data_loader = DataLoader(dataset, batch_size, shuffle=False)
+ 
             del dataset 
             
-            print(f'Time for iteration {i}:', time.time() - time2)
+        hypothesis_data = hypothesis_data.detach().cpu().tolist()
+        hypothesis_probs = hypothesis_probs.detach().cpu().tolist()
     
     return hypothesis_data, hypothesis_probs
   
+
 if __name__ == '__main__':
     args = parse_args()
+    manual_seed(1)
 
-    tokenizer_path = args.tokenizer_path
-    checkpoint = args.resume_from_checkpoint
-    batch_size = args.batch_size
-    output_beams = args.output_beams
-    gen_len = args.gen_len
-    iter_len = args.iter_len
-    TEMPERATURE = args.temperature
+    # Tokenizer load
+    start_time = time.time()
+    tokenizer = get_tokenizer(args.tokenizer_path, args.vocab_size)    
+    vocab_ids = sorted(tokenizer.get_vocab().values())
 
-    tokenizer = get_tokenizer(tokenizer_path=tokenizer_path)
+    # Model load
+    model_load_time = time.time()
+    model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=args.resume_from_checkpoint, torch_dtype=torch.float16)
+    model.eval()
 
-    time1 = time.time()
-    vocab_ids_list = collect_vocab_ids(tokenizer) # The ids of vocabulary tokens
-    print('Vocab Collection done:', time.time() - time1)
+    print(model)
+    print('Model loaded:', time.time() - model_load_time)
 
-    time2 = time.time()
-    model = OPTForCausalLM.from_pretrained(pretrained_model_name_or_path=checkpoint,torch_dtype=torch.float16).to('cuda')
-    print('Model loaded:', time.time() - time2)
+    beam_decoding_time = time.time()
+    accelerator = Accelerator()
+    # Beam decoding
+    new_hypothesis_data, new_hypothesis_probs = beam_decoding(model=model, accelerator=accelerator, batch_size=args.batch_size, vocab=vocab_ids, iter_len = args.iter_len, gen_len=args.gen_len, temp=args.temperature)
 
-    time3 = time.time()
-    new_hypothesis_data, new_hypothesis_probs = next_iteration(model=model, batch_size=batch_size, vocab=vocab_ids_list, iter_len = iter_len, gen_len=gen_len)
+    print("Beam decoding time:", time.time() - beam_decoding_time)
 
-    write_tokens_to_csv(new_hypothesis_data, new_hypothesis_probs, tokenizer, output_beams)
+    write_time = time.time()
+    print(f"Writing into a file {args.output_path} ...")
+    write_tokens_to_csv(args.output_path, new_hypothesis_data, new_hypothesis_probs, tokenizer)
+
+    print("Writing time:", time.time() - write_time)
+    print("Overall time:", time.time() - start_time)
