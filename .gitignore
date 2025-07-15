@@ -28,3 +28,6 @@ wandb
 .aim
 logging
 logging_old
+
+/src/plots
+/src/data/Python_data/exhaustive_generations

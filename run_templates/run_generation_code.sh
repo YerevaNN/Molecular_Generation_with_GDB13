@@ -11,23 +11,24 @@
 #SBATCH --partition=all
 
 
-export CUDA_VISIBLE_DEVICES=1
+# export CUDA_VISIBLE_DEVICES=1
 
 export N=1
-export GEN_LEN=$((N * 1000000))
+export GEN_LEN=$((N * 100000))
 export GEN_LEN_STR=$N"M" 
 export VOCAB_SIZE=192
 export TOP_K=192
 export TOP_P=1.0
 export TEMPERATURE=1.0
 export MODEL="LLama"
-
-for temp in 0.8
+# 0.95 1.1 1.3 1.5 1.7 
+# 0.6 0.7 0.9
+for temp in 0.5
 do
-     accelerate launch --config_file ../accelerate_fsdp_config_gen_llama.yaml \
+     accelerate launch --config_file ../accelerate_fsdp_config_gen_llama_2.yaml \
           ../src/generate_code.py \
      --tokenizer_name "meta-llama/Llama-3.2-1B" \
-     --resume_from_checkpoint /nfs/dgx/raid/molgen/code_recall/checkpoints/Llama-3-1B_tit_hf_4_epochs/step-3126/ \
+     --resume_from_checkpoint /nfs/dgx/raid/molgen/checkpoints/checkpoints_code/Llama-3-1B_tit_hf_4_epochs/step-3126/ \
      --output_dir "../src/ablations/generations/generations/code/model_ep_4_gen_"$GEN_LEN_STR"_temp_"$temp.txt\
      --batch_size 5000 \
      --gen_len $GEN_LEN \
